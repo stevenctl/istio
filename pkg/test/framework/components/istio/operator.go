@@ -255,11 +255,20 @@ func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, 
 				return fmt.Errorf("failed getting the istiod address for cluster %d: %v", controlPlaneCluster.Index(), err)
 			}
 			installSettings = append(installSettings, "--set", "values.global.remotePilotAddress="+istiodAddress.IP.String())
+
+			// temporarily disable ig so we don't  hang waiting for manifest to apply
+			installSettings = append(installSettings, "--set", "components.ingressGateways[0].replicaCount=0")
 			defer func() {
 				if err != nil {
 					return
 				}
-				err = replaceIstiodRemoteService(cluster, istiodAddress)
+				if err = replaceIstiodRemoteService(cluster, istiodAddress); err != nil {
+					return
+				}
+				// after istiod-remote is configured we can scale up ingress gateway
+				if err = cluster.Accessor.ScaleDeployment(ns, igwServiceName, 1); err != nil {
+					return
+				}
 			}()
 		}
 	}
