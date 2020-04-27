@@ -103,6 +103,13 @@ func (e *Environment) IsControlPlaneCluster(index resource.ClusterIndex) bool {
 	return true
 }
 
+func (e *Environment) GetControlPlaneCluster(cluster resource.Cluster) resource.Cluster {
+	if controlPlaneIndex, ok := e.Settings().ControlPlaneTopology[cluster.Index()]; ok {
+		return e.Clusters()[controlPlaneIndex]
+	}
+	return cluster
+}
+
 func (e *Environment) Case(name environment.Name, fn func()) {
 	if name == e.EnvironmentName() {
 		fn()

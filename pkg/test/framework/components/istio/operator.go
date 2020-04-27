@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
@@ -174,6 +175,23 @@ func deploy(ctx resource.Context, env *kube.Environment, cfg Config) (Instance, 
 			}
 		}
 	}
+	// Wait for all of the control planes to be started before deploying remote clusters
+	for _, cluster := range env.KubeClusters {
+		if env.IsControlPlaneCluster(cluster.Index()) {
+			if err := waitForControlPlane(i, cluster, cfg); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// Deploy Istio to remote clusters
+	for _, cluster := range env.KubeClusters {
+		if !env.IsControlPlaneCluster(cluster.Index()) {
+			if err := deployControlPlane(i, cfg, cluster, iopFile); err != nil {
+				return nil, fmt.Errorf("failed deploying control plane to cluster %d: %v", cluster.Index(), err)
+			}
+		}
+	}
 
 	if env.IsMulticluster() {
 		// For multicluster, configure direct access so each control plane can get endpoints from all
@@ -193,7 +211,7 @@ func deploy(ctx resource.Context, env *kube.Environment, cfg Config) (Instance, 
 	return i, nil
 }
 
-func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, iopFile string) error {
+func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, iopFile string) (err error) {
 	// Create an istioctl to configure this cluster.
 	istioCtl, err := istioctl.New(c.ctx, istioctl.Config{
 		Cluster: cluster,
@@ -225,6 +243,25 @@ func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, 
 		// Set the clusterName for the local cluster.
 		// This MUST match the clusterName in the remote secret for this cluster.
 		installSettings = append(installSettings, "--set", "values.global.multiCluster.clusterName="+cluster.Name())
+
+		if c.environment.IsControlPlaneCluster(cluster.Index()) {
+			// Expose Istiod through ingress to allow remote clusters to connect
+			installSettings = append(installSettings, "--set", "values.global.meshExpansion.enabled=true")
+		} else {
+			installSettings = append(installSettings, "--set", "profile=remote")
+			controlPlaneCluster := c.environment.GetControlPlaneCluster(cluster).(kube.Cluster)
+			istiodAddress, err := getIstiodAddress(c.environment, controlPlaneCluster)
+			if err != nil {
+				return fmt.Errorf("failed getting the istiod address for cluster %d: %v", controlPlaneCluster.Index(), err)
+			}
+			installSettings = append(installSettings, "--set", "values.global.remotePilotAddress="+istiodAddress.IP.String())
+			defer func() {
+				if err != nil {
+					return
+				}
+				err = replaceIstiodRemoteService(cluster, istiodAddress)
+			}()
+		}
 	}
 
 	// Save the manifest generate output so we can later cleanup
@@ -248,6 +285,48 @@ func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, 
 		return fmt.Errorf("manifest apply failed: %v", err)
 	}
 
+	return nil
+}
+
+// replaceIstiodRemoteService deletes and recreates the istiod-remote Service and Endpoint with two key differences:
+// - The Service does not user `ClusterIP: None` so we can map 15012 to the configured port as `targetPort`
+// - The Endpoint uses the given port rather than the default 15012
+func replaceIstiodRemoteService(cluster kube.Cluster, address net.TCPAddr) error {
+	if err := cluster.Accessor.DeleteService("istiod-remote", "istio-system"); err != nil {
+		return fmt.Errorf("failed deleting istiod-remote in cluster %d: %v", cluster.Index(), err)
+	}
+
+	manifest := fmt.Sprintf(`
+apiVersion: v1
+kind: Service
+metadata:
+  name: istiod-remote
+  namespace: istio-system
+spec:
+  ports:
+  - name: tcp-istiod
+    port: 15012
+    protocol: TCP
+    targetPort: %d
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: istiod-remote
+  namespace: istio-system
+subsets:
+- addresses:
+  - ip: %s
+  ports:
+  - name: tcp-istiod
+    port: %d
+    protocol: TCP
+`, address.Port, address.IP, address.Port)
+	if _, err := cluster.Accessor.ApplyContents("istio-system", manifest); err != nil {
+		return fmt.Errorf("failed creating istiod-remote ClusterIP service in cluster %d: %v", cluster.Index(), err)
+	}
 	return nil
 }
 

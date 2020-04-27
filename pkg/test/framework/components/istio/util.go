@@ -16,7 +16,10 @@ package istio
 
 import (
 	"fmt"
+	"net"
 	"time"
+
+	kubeenv "istio.io/istio/pkg/test/framework/components/environment/kube"
 
 	"istio.io/istio/pkg/test/kube"
 	"istio.io/istio/pkg/test/scopes"
@@ -39,6 +42,12 @@ spec:
 `
 )
 
+var (
+	ns             = "istio-system"
+	igwServiceName = "istio-ingressgateway"
+	istiodPort     = 15012
+)
+
 func waitForValidationWebhook(accessor *kube.Accessor, cfg Config) error {
 	dummyValidationRule := fmt.Sprintf(dummyValidationRuleTemplate, cfg.SystemNamespace)
 	defer func() {
@@ -57,4 +66,62 @@ func waitForValidationWebhook(accessor *kube.Accessor, cfg Config) error {
 
 		return fmt.Errorf("validation webhook not ready yet: %v", err)
 	}, retry.Timeout(time.Minute))
+}
+
+// TODO(landow) extract this "get nodeport or loadbalancer address" logic
+func getIstiodAddress(env *kubeenv.Environment, cluster kubeenv.Cluster) (net.TCPAddr, error) {
+	// In KinD, we don't have LoadBalancer support. Instead we do a little bit of trickery to to get the Node
+	// port for istiod though the ingressgateway service. The Minikube flag is a misnomer.
+	if env.Settings().Minikube {
+		pods, err := cluster.GetPods(ns, "istio=ingressgateway")
+		if err != nil {
+			return net.TCPAddr{}, err
+		}
+
+		scopes.Framework.Debugf("Querying ingress, pods:\n%v\n", pods)
+		if len(pods) == 0 {
+			return net.TCPAddr{}, fmt.Errorf("no ingress pod found")
+		}
+
+		scopes.Framework.Debugf("Found pod: \n%v\n", pods[0])
+		ip := pods[0].Status.HostIP
+		if ip == "" {
+			return net.TCPAddr{}, fmt.Errorf("no Host IP available on the ingress node yet")
+		}
+
+		svc, err := cluster.GetService(ns, igwServiceName)
+		if err != nil {
+			return net.TCPAddr{}, err
+		}
+
+		scopes.Framework.Debugf("Found service for the gateway:\n%v\n", svc)
+		if len(svc.Spec.Ports) == 0 {
+			return net.TCPAddr{}, fmt.Errorf("no ports found in service: %s/%s", ns, "istio-ingressgateway")
+		}
+
+		var nodePort int32
+		for _, svcPort := range svc.Spec.Ports {
+			if svcPort.Protocol == "TCP" && svcPort.Port == int32(istiodPort) {
+				nodePort = svcPort.NodePort
+				break
+			}
+		}
+		if nodePort == 0 {
+			return net.TCPAddr{}, fmt.Errorf("no port %d found in service: %s/%s", istiodPort, ns, "istio-ingressgateway")
+		}
+
+		return net.TCPAddr{IP: net.ParseIP(ip), Port: int(nodePort)}, nil
+	}
+
+	// Otherwise, get the load balancer IP.
+	svc, err := cluster.GetService("istio-system", igwServiceName)
+	if err != nil {
+		return net.TCPAddr{}, err
+	}
+	if len(svc.Status.LoadBalancer.Ingress) == 0 || svc.Status.LoadBalancer.Ingress[0].IP == "" {
+		return net.TCPAddr{}, fmt.Errorf("service ingress is not available yet: %s/%s", svc.Namespace, svc.Name)
+	}
+
+	ip := svc.Status.LoadBalancer.Ingress[0].IP
+	return net.TCPAddr{IP: net.ParseIP(ip), Port: istiodPort}, nil
 }

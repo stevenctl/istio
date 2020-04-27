@@ -431,6 +431,11 @@ func (a *Accessor) GetService(ns string, name string) (*kubeApiCore.Service, err
 	return a.set.CoreV1().Services(ns).Get(context.TODO(), name, kubeApiMeta.GetOptions{})
 }
 
+// Delete service deletes the service entry with the given name/namespace.
+func (a *Accessor) DeleteService(name, ns string) error {
+	return a.set.CoreV1().Services(ns).Delete(context.TODO(), name, kubeApiMeta.DeleteOptions{})
+}
+
 // GetDeployment returns the deployment with the given name/namespace.
 func (a *Accessor) GetDeployment(ns string, name string) (*appsv1.Deployment, error) {
 	return a.set.AppsV1().Deployments(ns).Get(context.TODO(), name, kubeApiMeta.GetOptions{})
