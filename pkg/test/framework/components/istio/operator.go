@@ -306,7 +306,7 @@ func replaceIstiodRemoteService(cluster kube.Cluster, address net.TCPAddr) error
 	}
 
 	manifest := fmt.Sprintf(`
-apiVersion: v1
+apiVersion: kubeApiCore
 kind: Service
 metadata:
   name: istiod-remote
@@ -320,7 +320,7 @@ spec:
   sessionAffinity: None
   type: ClusterIP
 ---
-apiVersion: v1
+apiVersion: kubeApiCore
 kind: Endpoints
 metadata:
   name: istiod-remote
@@ -389,7 +389,34 @@ func createRemoteSecret(ctx resource.Context, cluster kube.Cluster) (string, err
 	if err != nil {
 		return "", fmt.Errorf("create remote secret failed for cluster %d: %v", cluster.Index(), err)
 	}
+
+	// in a KinD environment, Istio will need to reach out to remote clusters on their docker network address
+	if ctx.Environment().(*kube.Environment).Settings().Minikube {
+		addr, err := getApiServerAddress(cluster)
+		if err != nil {
+			return "", fmt.Errorf("failed to get address for KinD cluster %d API server: %v", cluster.Index(), err)
+		}
+		url := fmt.Sprintf("https://%s/%d", addr.IP, addr.Port)
+		out = regexp.MustCompile("server: https://(\\d{1,3}\\.?){4}:\\d{1,5}").ReplaceAllString(out, "server: "+url)
+	}
+
 	return out, nil
+}
+
+func getApiServerAddress(cluster kube.Cluster) (net.TCPAddr, error) {
+	// TODO(landow) use an approach that will be compatible with multi
+	kSvc, err := cluster.GetService("default", "kubernetes")
+	if err != nil {
+		return net.TCPAddr{}, fmt.Errorf("failed to get kubernetes service on cluster %d: %v", cluster.Index(), err)
+	}
+	var ip net.IP
+	if ip = net.ParseIP(kSvc.Spec.ClusterIP); ip == nil {
+		return net.TCPAddr{}, fmt.Errorf("kubernetes service has invalid clusterIP in cluster %d: '%s'", cluster.Index(), kSvc.Spec.ClusterIP)
+	}
+	if len(kSvc.Spec.Ports) < 1 {
+		return net.TCPAddr{}, fmt.Errorf("kubernetes service has no ports in cluster %d", cluster.Index())
+	}
+	return net.TCPAddr{IP: ip, Port: int(kSvc.Spec.Ports[0].Port)}, nil
 }
 
 func deployCACerts(workDir string, env *kube.Environment, cfg Config) error {
