@@ -95,10 +95,22 @@ func Deploy(ctx resource.Context, cfg *Config) (Instance, error) {
 	var i Instance
 	switch ctx.Environment().EnvironmentName() {
 	case environment.Kube:
-		i, err = deploy(ctx, ctx.Environment().(*kube.Environment), *cfg)
+		i = newKube(ctx, cfg)
+		err = i.deploy(ctx, *cfg)
 	default:
 		err = resource.UnsupportedEnvironment(ctx.Environment())
 	}
 
 	return i, err
+}
+
+func newKube(ctx resource.Context, cfg *Config) Instance {
+	i := &operatorComponent{
+		settings:        *cfg,
+		ctx:             ctx,
+		environment:     ctx.Environment().(*kube.Environment),
+		installManifest: map[string]string{},
+	}
+	i.id = ctx.TrackResource(i)
+	return i
 }

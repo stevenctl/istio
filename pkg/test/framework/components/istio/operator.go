@@ -128,18 +128,10 @@ func (i *operatorComponent) Dump() {
 	}
 }
 
-func deploy(ctx resource.Context, env *kube.Environment, cfg Config) (Instance, error) {
+func (i *operatorComponent) deploy(ctx resource.Context, env *kube.Environment, cfg Config) (Instance, error) {
 	scopes.CI.Infof("=== Istio Component Config ===")
 	scopes.CI.Infof("\n%s", cfg.String())
 	scopes.CI.Infof("================================")
-
-	i := &operatorComponent{
-		environment:     env,
-		settings:        cfg,
-		ctx:             ctx,
-		installManifest: map[string]string{},
-	}
-	i.id = ctx.TrackResource(i)
 
 	if !cfg.DeployIstio {
 		scopes.Framework.Info("skipping deployment as specified in the config")
@@ -154,7 +146,7 @@ func deploy(ctx resource.Context, env *kube.Environment, cfg Config) (Instance, 
 
 	// For multicluster, create and push the CA certs to all clusters to establish a shared root of trust.
 	if env.IsMulticluster() {
-		if err := deployCACerts(workDir, env, cfg); err != nil {
+		if err := i.deployCACerts(workDir); err != nil {
 			return nil, err
 		}
 	}
@@ -169,7 +161,7 @@ func deploy(ctx resource.Context, env *kube.Environment, cfg Config) (Instance, 
 	// Deploy the Istio control plane(s)
 	for _, cluster := range env.KubeClusters {
 		if env.IsControlPlaneCluster(cluster) {
-			if err := deployControlPlane(i, cfg, cluster, iopFile); err != nil {
+			if err := i.deployControlPlane(cluster, iopFile); err != nil {
 				return nil, fmt.Errorf("failed deploying control plane to cluster %d: %v", cluster.Index(), err)
 			}
 		}
@@ -178,14 +170,14 @@ func deploy(ctx resource.Context, env *kube.Environment, cfg Config) (Instance, 
 	if env.IsMulticluster() {
 		// For multicluster, configure direct access so each control plane can get endpoints from all
 		// API servers.
-		if err := configureDirectAPIServerAccess(ctx, env, cfg); err != nil {
+		if err := i.configureDirectAPIServerAccess(ctx, env, cfg); err != nil {
 			return nil, err
 		}
 	}
 
 	// Wait for all of the control planes to be started.
 	for _, cluster := range env.KubeClusters {
-		if err := waitForControlPlane(i, cluster, cfg); err != nil {
+		if err := i.waitForControlPlane(cluster); err != nil {
 			return nil, err
 		}
 	}
@@ -193,9 +185,9 @@ func deploy(ctx resource.Context, env *kube.Environment, cfg Config) (Instance, 
 	return i, nil
 }
 
-func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, iopFile string) error {
+func (i *operatorComponent) deployControlPlane(cluster kube.Cluster, iopFile string) error {
 	// Create an istioctl to configure this cluster.
-	istioCtl, err := istioctl.New(c.ctx, istioctl.Config{
+	istioCtl, err := istioctl.New(i.ctx, istioctl.Config{
 		Cluster: cluster,
 	})
 	if err != nil {
@@ -206,7 +198,7 @@ func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, 
 	if err != nil {
 		return err
 	}
-	defaultsIOPFile := cfg.IOPFile
+	defaultsIOPFile := i.settings.IOPFile
 	if !path.IsAbs(defaultsIOPFile) {
 		defaultsIOPFile = filepath.Join(env.IstioSrc, defaultsIOPFile)
 	}
@@ -218,10 +210,10 @@ func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, 
 		"--charts", filepath.Join(env.IstioSrc, "manifests"),
 	}
 	// Include all user-specified values.
-	for k, v := range cfg.Values {
+	for k, v := range i.settings.Values {
 		installSettings = append(installSettings, "--set", fmt.Sprintf("values.%s=%s", k, v))
 	}
-	if c.environment.IsMulticluster() {
+	if i.environment.IsMulticluster() {
 		// Set the clusterName for the local cluster.
 		// This MUST match the clusterName in the remote secret for this cluster.
 		installSettings = append(installSettings, "--set", "values.global.multiCluster.clusterName="+cluster.Name())
@@ -234,7 +226,7 @@ func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, 
 	if err != nil {
 		return err
 	}
-	c.installManifest[cluster.Name()] = out
+	i.installManifest[cluster.Name()] = out
 
 	// Actually run the manifest apply command
 	cmd := []string{
@@ -251,23 +243,23 @@ func deployControlPlane(c *operatorComponent, cfg Config, cluster kube.Cluster, 
 	return nil
 }
 
-func waitForControlPlane(dumper resource.Dumper, cluster kube.Cluster, cfg Config) error {
-	if !cfg.SkipWaitForValidationWebhook {
+func (i *operatorComponent) waitForControlPlane(cluster kube.Cluster) error {
+	if !i.settings.SkipWaitForValidationWebhook {
 		// Wait for webhook to come online. The only reliable way to do that is to see if we can submit invalid config.
-		if err := waitForValidationWebhook(cluster.Accessor, cfg); err != nil {
-			dumper.Dump()
+		if err := waitForValidationWebhook(cluster.Accessor, i.settings); err != nil {
+			i.Dump()
 			return err
 		}
 	}
 	return nil
 }
 
-func configureDirectAPIServerAccess(ctx resource.Context, env *kube.Environment, cfg Config) error {
+func (i *operatorComponent) configureDirectAPIServerAccess(ctx resource.Context, env *kube.Environment, cfg Config) error {
 	// Configure direct access for each control plane to each APIServer. This allows each control plane to
 	// automatically discover endpoints in remote clusters.
 	for _, cluster := range env.KubeClusters {
 		// Create a secret.
-		secret, err := createRemoteSecret(ctx, cluster)
+		secret, err := i.createRemoteSecret(cluster)
 		if err != nil {
 			return fmt.Errorf("failed creating remote secret for cluster %s: %v", cluster.Name(), err)
 		}
@@ -284,8 +276,8 @@ func configureDirectAPIServerAccess(ctx resource.Context, env *kube.Environment,
 	return nil
 }
 
-func createRemoteSecret(ctx resource.Context, cluster kube.Cluster) (string, error) {
-	istioCtl, err := istioctl.New(ctx, istioctl.Config{
+func (i *operatorComponent) createRemoteSecret(cluster kube.Cluster) (string, error) {
+	istioCtl, err := istioctl.New(i.ctx, istioctl.Config{
 		Cluster: cluster,
 	})
 	if err != nil {
@@ -304,7 +296,7 @@ func createRemoteSecret(ctx resource.Context, cluster kube.Cluster) (string, err
 	return out, nil
 }
 
-func deployCACerts(workDir string, env *kube.Environment, cfg Config) error {
+func (i *operatorComponent) deployCACerts(workDir string) error {
 	certsDir := filepath.Join(workDir, "cacerts")
 	if err := os.Mkdir(certsDir, 0700); err != nil {
 		return err
@@ -315,7 +307,7 @@ func deployCACerts(workDir string, env *kube.Environment, cfg Config) error {
 		return fmt.Errorf("failed creating the root CA: %v", err)
 	}
 
-	for _, cluster := range env.KubeClusters {
+	for _, cluster := range i.environment.KubeClusters {
 		// Create a subdir for the cluster certs.
 		clusterDir := filepath.Join(certsDir, cluster.Name())
 		if err := os.Mkdir(clusterDir, 0700); err != nil {
@@ -323,7 +315,7 @@ func deployCACerts(workDir string, env *kube.Environment, cfg Config) error {
 		}
 
 		// Create the new extensions config for the CA
-		caConfig, err := ca.NewIstioConfig(cfg.SystemNamespace)
+		caConfig, err := ca.NewIstioConfig(i.settings.SystemNamespace)
 		if err != nil {
 			return err
 		}
@@ -342,13 +334,13 @@ func deployCACerts(workDir string, env *kube.Environment, cfg Config) error {
 		}
 
 		// Create the system namespace.
-		if err := cluster.CreateNamespace(cfg.SystemNamespace, ""); err != nil {
+		if err := cluster.CreateNamespace(i.settings.SystemNamespace, ""); err != nil {
 			scopes.CI.Infof("failed creating namespace %s on cluster %s. This can happen when deploying "+
-				"multiple control planes. Error: %v", cfg.SystemNamespace, cluster.Name(), err)
+				"multiple control planes. Error: %v", i.settings.SystemNamespace, cluster.Name(), err)
 		}
 
 		// Create the secret for the cacerts.
-		if err := cluster.CreateSecret(cfg.SystemNamespace, secret); err != nil {
+		if err := cluster.CreateSecret(i.settings.SystemNamespace, secret); err != nil {
 			scopes.CI.Infof("failed to create CA secrets on cluster %s. This can happen when deploying "+
 				"multiple control planes. Error: %v", cluster.Name(), err)
 		}
