@@ -80,15 +80,16 @@ func TestIngessToPrometheus_IngressMetric(t *testing.T) {
 
 func testMetric(t *testing.T, ctx framework.TestContext, label string, labelValue string) { // nolint:interfacer
 	t.Helper()
+	istioCfg := ist.Settings()
 	g.ApplyConfigOrFail(
 		t,
 		bookinfoNs,
-		bookinfo.GetDestinationRuleConfigFileOrFail(t, ctx).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
+		bookinfo.GetDestinationRuleConfigFile(istioCfg.IsMtlsEnabled()).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 		bookinfo.NetworkingVirtualServiceAllV1.LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 	)
 	defer g.DeleteConfigOrFail(t,
 		bookinfoNs,
-		bookinfo.GetDestinationRuleConfigFileOrFail(t, ctx).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
+		bookinfo.GetDestinationRuleConfigFile(istioCfg.IsMtlsEnabled()).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 		bookinfo.NetworkingVirtualServiceAllV1.LoadWithNamespaceOrFail(t, bookinfoNs.Name()))
 
 	util.AllowRuleSync(t)
@@ -152,16 +153,17 @@ func TestTcpMetric(t *testing.T) {
 			_ = bookinfo.DeployOrFail(t, ctx, bookinfo.Config{Namespace: bookinfoNs, Cfg: bookinfo.BookinfoRatingsv2})
 			_ = bookinfo.DeployOrFail(t, ctx, bookinfo.Config{Namespace: bookinfoNs, Cfg: bookinfo.BookinfoDB})
 
+			istioCfg := ist.Settings()
 			g.ApplyConfigOrFail(
 				t,
 				bookinfoNs,
-				bookinfo.GetDestinationRuleConfigFileOrFail(t, ctx).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
+				bookinfo.GetDestinationRuleConfigFile(istioCfg.IsMtlsEnabled()).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 				bookinfo.NetworkingTCPDbRule.LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 			)
 			defer g.DeleteConfigOrFail(
 				t,
 				bookinfoNs,
-				bookinfo.GetDestinationRuleConfigFileOrFail(t, ctx).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
+				bookinfo.GetDestinationRuleConfigFile(istioCfg.IsMtlsEnabled()).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 				bookinfo.NetworkingTCPDbRule.LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 			)
 

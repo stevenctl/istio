@@ -54,15 +54,16 @@ func TestTcpMetric(t *testing.T) { // nolint:interfacer
 		Run(func(ctx framework.TestContext) {
 			addr := ing.HTTPAddress()
 			url := fmt.Sprintf("http://%s/productpage", addr.String())
+			istioCfg := ist.Settings()
 			g.ApplyConfigOrFail(
 				t,
 				bookinfoNs,
-				bookinfo.GetDestinationRuleConfigFileOrFail(t, ctx).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
+				bookinfo.GetDestinationRuleConfigFile(istioCfg.IsMtlsEnabled()).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 				bookinfo.NetworkingTCPDbRule.LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 			)
 			defer g.DeleteConfig(
 				bookinfoNs,
-				bookinfo.GetDestinationRuleConfigFileOrFail(t, ctx).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
+				bookinfo.GetDestinationRuleConfigFile(istioCfg.IsMtlsEnabled()).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 				bookinfo.NetworkingTCPDbRule.LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 			)
 

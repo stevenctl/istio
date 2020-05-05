@@ -76,10 +76,11 @@ func TestIngressLoadBalancing(t *testing.T) {
 		t,
 		d.Namespace(),
 		bookinfo.NetworkingBookinfoGateway.LoadGatewayFileWithNamespaceOrFail(t, bookinfoNs.Name()))
+	istioCfg := ist.Settings()
 	g.ApplyConfigOrFail(
 		t,
 		d.Namespace(),
-		bookinfo.GetDestinationRuleConfigFileOrFail(t, ctx).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
+		bookinfo.GetDestinationRuleConfigFile(istioCfg.IsMtlsEnabled()).LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 		bookinfo.NetworkingVirtualServiceAllV1.LoadWithNamespaceOrFail(t, bookinfoNs.Name()),
 	)
 

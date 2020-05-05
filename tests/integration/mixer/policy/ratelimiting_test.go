@@ -314,10 +314,8 @@ func testsetup(ctx resource.Context) (err error) {
 	if err != nil {
 		return
 	}
-	destinationRule, err := bookinfo.GetDestinationRuleConfigFile(ctx)
-	if err != nil {
-		return
-	}
+	istioCfg := ist.Settings()
+	destinationRule := bookinfo.GetDestinationRuleConfigFile(istioCfg.IsMtlsEnabled())
 	destinationRuleFile, err := destinationRule.LoadWithNamespace(bookinfoNs.Name())
 	if err != nil {
 		return

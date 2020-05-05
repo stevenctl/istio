@@ -21,8 +21,6 @@ import (
 
 	"istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/env"
-	"istio.io/istio/pkg/test/framework/components/istio"
-	"istio.io/istio/pkg/test/framework/resource"
 	"istio.io/istio/pkg/test/scopes"
 	"istio.io/istio/pkg/test/util/file"
 )
@@ -130,26 +128,11 @@ func (l ConfigFile) LoadOrFail(t test.Failer) string {
 	return l.LoadWithNamespaceOrFail(t, "")
 }
 
-func GetDestinationRuleConfigFileOrFail(t test.Failer, ctx resource.Context) ConfigFile {
-	t.Helper()
-
-	cfg, err := GetDestinationRuleConfigFile(ctx)
-	if err != nil {
-		t.Fatalf("bookinfo.GetDestinationRuleConfigFile: %v", err)
+func GetDestinationRuleConfigFile(mtlsEnabled bool) ConfigFile {
+	if mtlsEnabled {
+		return NetworkingDestinationRuleAllMtls
 	}
-
-	return cfg
-}
-
-func GetDestinationRuleConfigFile(ctx resource.Context) (ConfigFile, error) {
-	cfg, err := istio.DefaultConfig(ctx)
-	if err != nil {
-		return "", fmt.Errorf("bookinfo.GetDestinationRuleConfigFile: %v", err)
-	}
-	if cfg.IsMtlsEnabled() {
-		return NetworkingDestinationRuleAllMtls, nil
-	}
-	return NetworkingDestinationRuleAll, nil
+	return NetworkingDestinationRuleAll
 }
 
 func replaceBookinfoAppAddressWithFQDNAddress(fileContent, namespace string) string {
