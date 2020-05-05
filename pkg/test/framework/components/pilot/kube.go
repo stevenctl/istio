@@ -44,7 +44,7 @@ func newKube(ctx resource.Context, cfg Config) (Instance, error) {
 	c.id = ctx.TrackResource(c)
 
 	// TODO: This should be obtained from an Istio deployment.
-	icfg, err := istio.DefaultConfig(ctx)
+	icfg, err := istio.ConfigFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -89,7 +89,7 @@ func NewOrFail(t test.Failer, ctx resource.Context, nsConfig Config) Instance {
 func ClaimSystemNamespace(ctx resource.Context) (Instance, error) {
 	switch ctx.Environment().EnvironmentName() {
 	case environment.Kube:
-		istioCfg, err := istio.DefaultConfig(ctx)
+		istioCfg, err := istio.ConfigFromContext(ctx)
 		if err != nil {
 			return nil, err
 		}

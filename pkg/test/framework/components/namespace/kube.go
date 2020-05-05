@@ -124,7 +124,7 @@ func (n *kubeNamespace) Close() (err error) {
 
 func claimKube(ctx resource.Context, name string, injectSidecar bool) (Instance, error) {
 	env := ctx.Environment().(*kube.Environment)
-	cfg, err := istio.DefaultConfig(ctx)
+	cfg, err := istio.ConfigFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

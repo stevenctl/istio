@@ -59,7 +59,7 @@ func newKube(ctx resource.Context, cfgIn Config) (*kubeComponent, error) {
 	}
 
 	// TODO: This should be obtained from an Istio deployment.
-	cfg, err := istio.DefaultConfig(ctx)
+	cfg, err := istio.ConfigFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

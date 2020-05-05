@@ -55,7 +55,7 @@ func TestSdsEgressGatewayIstioMutual(t *testing.T) {
 		RequiresEnvironment(environment.Kube).
 		Run(func(ctx framework.TestContext) {
 			ctx.RequireOrSkip(environment.Kube)
-			istioCfg := istio.DefaultConfigOrFail(t, ctx)
+			istioCfg := istio.ConfigFromContextOrFail(t, ctx)
 
 			namespace.ClaimOrFail(t, ctx, istioCfg.SystemNamespace)
 			ns := namespace.NewOrFail(t, ctx, namespace.Config{

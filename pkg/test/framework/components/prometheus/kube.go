@@ -62,7 +62,7 @@ func newKube(ctx resource.Context, cfgIn Config) (Instance, error) {
 	c.id = ctx.TrackResource(c)
 
 	// Find the Prometheus pod and service, and start forwarding a local port.
-	cfg, err := istio.DefaultConfig(ctx)
+	cfg, err := istio.ConfigFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

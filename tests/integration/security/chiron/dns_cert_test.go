@@ -97,7 +97,7 @@ func TestDNSCertificate(t *testing.T) {
 		RequiresEnvironment(environment.Kube).
 		Run(func(ctx framework.TestContext) {
 			var galleySecret, galleySecret2, sidecarInjectorSecret, sidecarInjectorSecret2 *corev1.Secret
-			istio.DefaultConfigOrFail(t, ctx)
+			istio.ConfigFromContextOrFail(t, ctx)
 			c := chiron.NewOrFail(t, ctx, chiron.Config{Istio: inst})
 			cluster := ctx.Environment().(*kube.Environment).KubeClusters[0]
 			istioNs := inst.Settings().IstioNamespace

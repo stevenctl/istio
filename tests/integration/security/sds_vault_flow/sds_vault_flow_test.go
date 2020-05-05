@@ -43,7 +43,7 @@ func TestSdsVaultCaFlow(t *testing.T) {
 			// https://github.com/istio/istio/issues/17572.
 			t.Skip("skipped for Istio versions using Trustworthy JWT, https://github.com/istio/istio/issues/17572")
 
-			istioCfg := istio.DefaultConfigOrFail(t, ctx)
+			istioCfg := istio.ConfigFromContextOrFail(t, ctx)
 
 			namespace.ClaimOrFail(t, ctx, istioCfg.SystemNamespace)
 			ns := namespace.NewOrFail(t, ctx, namespace.Config{

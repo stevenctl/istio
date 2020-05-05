@@ -42,7 +42,7 @@ func Setup(i *Instance, cfn SetupConfigFn, ctxFns ...SetupContextFn) resource.Se
 			scopes.Framework.Debugf("istio.Setup: Skipping deployment of Istio on native")
 
 		case environment.Kube:
-			cfg, err := DefaultConfig(ctx)
+			cfg, err := defaultConfig(ctx)
 			if err != nil {
 				return err
 			}
@@ -72,10 +72,10 @@ func Setup(i *Instance, cfn SetupConfigFn, ctxFns ...SetupContextFn) resource.Se
 	}
 }
 
-// Deploy deploys (or attaches to) an Istio deployment and returns a handle. If cfg is nil, then DefaultConfig is used.
+// Deploy deploys (or attaches to) an Istio deployment and returns a handle. If cfg is nil, then defaultConfig is used.
 func Deploy(ctx resource.Context, cfg *Config) (Instance, error) {
 	if cfg == nil {
-		c, err := DefaultConfig(ctx)
+		c, err := defaultConfig(ctx)
 		if err != nil {
 			return nil, err
 		}

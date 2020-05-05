@@ -142,7 +142,7 @@ func GetDestinationRuleConfigFileOrFail(t test.Failer, ctx resource.Context) Con
 }
 
 func GetDestinationRuleConfigFile(ctx resource.Context) (ConfigFile, error) {
-	cfg, err := istio.DefaultConfig(ctx)
+	cfg, err := istio.ConfigFromContext(ctx)
 	if err != nil {
 		return "", fmt.Errorf("bookinfo.GetDestinationRuleConfigFile: %v", err)
 	}

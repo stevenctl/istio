@@ -192,8 +192,8 @@ func Indent(text, indent string) string {
 	return result[:len(result)-1]
 }
 
-// DefaultConfig creates a new Config from defaults, environments variables, and command-line parameters.
-func DefaultConfig(ctx resource.Context) (Config, error) {
+// defaultConfig creates a new Config from defaults, environments variables, and command-line parameters.
+func defaultConfig(ctx resource.Context) (Config, error) {
 	// Make a local copy.
 	s := *settingsFromCommandline
 
@@ -226,9 +226,19 @@ func DefaultConfig(ctx resource.Context) (Config, error) {
 	return s, nil
 }
 
-// DefaultConfigOrFail calls DefaultConfig and fails t if an error occurs.
-func DefaultConfigOrFail(t test.Failer, ctx resource.Context) Config {
-	cfg, err := DefaultConfig(ctx)
+// ConfigFromContext attempts to find an instance of the istio component in the resource.Context and returns it's configuration
+func ConfigFromContext(ctx resource.Context) (Config, error) {
+	var inst Instance
+	err := ctx.GetResource(&inst)
+	if err != nil {
+		return Config{}, err
+	}
+	return inst.Settings(), err
+}
+
+// ConfigFromContextOrFail calls ConfigFromContext and fails t if an error occurs.
+func ConfigFromContextOrFail(t test.Failer, ctx resource.Context) Config {
+	cfg, err := ConfigFromContext(ctx)
 	if err != nil {
 		t.Fatalf("Get istio config: %v", err)
 	}
