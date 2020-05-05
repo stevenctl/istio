@@ -88,11 +88,10 @@ var IngressCredentialServerKeyCertB = IngressCredential{
 // and creates K8s secrets for ingress gateway.
 // nolint: interfacer
 func CreateIngressKubeSecret(t test.Failer, ctx framework.TestContext, credNames []string,
-	ingressType ingress.CallType, ingressCred IngressCredential) {
+	ingressType ingress.CallType, ingressCred IngressCredential, ns string) {
 	t.Helper()
 	// Get namespace for ingress gateway pod.
-	istioCfg := istio.DefaultConfigOrFail(t, ctx)
-	systemNS := namespace.ClaimOrFail(t, ctx, istioCfg.SystemNamespace)
+	systemNS := namespace.ClaimOrFail(t, ctx, ns)
 
 	if len(credNames) == 0 {
 		ctx.Log("no credential names are specified, skip creating ingress secret")
@@ -121,10 +120,9 @@ func CreateIngressKubeSecret(t test.Failer, ctx framework.TestContext, credNames
 
 // DeleteIngressKubeSecret deletes a secret
 // nolint: interfacer
-func DeleteIngressKubeSecret(t test.Failer, ctx framework.TestContext, credNames []string) {
+func DeleteIngressKubeSecret(t test.Failer, ctx framework.TestContext, credNames []string, istioNS string) {
 	// Get namespace for ingress gateway pod.
-	istioCfg := istio.DefaultConfigOrFail(t, ctx)
-	systemNS := namespace.ClaimOrFail(t, ctx, istioCfg.SystemNamespace)
+	systemNS := namespace.ClaimOrFail(t, ctx, istioNS)
 
 	if len(credNames) == 0 {
 		ctx.Log("no credential names are specified, skip creating ingress secret")
@@ -220,10 +218,9 @@ func SendRequest(ing ingress.Instance, host string, path string, callType ingres
 // RotateSecrets deletes kubernetes secrets by name in credNames and creates same secrets using key/cert
 // from ingressCred.
 func RotateSecrets(t *testing.T, ctx framework.TestContext, credNames []string, // nolint:interfacer
-	ingressType ingress.CallType, ingressCred IngressCredential) {
+	ingressType ingress.CallType, ingressCred IngressCredential, ns string) {
 	t.Helper()
-	istioCfg := istio.DefaultConfigOrFail(t, ctx)
-	systemNS := namespace.ClaimOrFail(t, ctx, istioCfg.SystemNamespace)
+	systemNS := namespace.ClaimOrFail(t, ctx, ns)
 	kubeAccessor := ctx.Environment().(*kube.Environment).KubeClusters[0]
 	for _, cn := range credNames {
 		scrt, err := kubeAccessor.GetSecret(systemNS.Name()).Get(context.TODO(), cn, metav1.GetOptions{})
@@ -374,8 +371,9 @@ func RunTestMultiMtlsGateways(ctx framework.TestContext,
 		})
 		credNames = append(credNames, cred)
 	}
-	CreateIngressKubeSecret(ctx, ctx, credNames, ingress.Mtls, IngressCredentialA)
-	defer DeleteIngressKubeSecret(ctx, ctx, credNames)
+	istioNS := inst.Settings().SystemNamespace
+	CreateIngressKubeSecret(ctx, ctx, credNames, ingress.Mtls, IngressCredentialA, istioNS)
+	defer DeleteIngressKubeSecret(ctx, ctx, credNames, istioNS)
 	ns := SetupTest(ctx, g)
 	SetupConfig(ctx, g, ns, tests...)
 	ing := ingress.NewOrFail(ctx, ctx, ingress.Config{
@@ -415,8 +413,9 @@ func RunTestMultiTLSGateways(ctx framework.TestContext,
 		})
 		credNames = append(credNames, cred)
 	}
-	CreateIngressKubeSecret(ctx, ctx, credNames, ingress.Mtls, IngressCredentialA)
-	defer DeleteIngressKubeSecret(ctx, ctx, credNames)
+	istioNS := inst.Settings().SystemNamespace
+	CreateIngressKubeSecret(ctx, ctx, credNames, ingress.Mtls, IngressCredentialA, istioNS)
+	defer DeleteIngressKubeSecret(ctx, ctx, credNames, istioNS)
 	ns := SetupTest(ctx, g)
 	SetupConfig(ctx, g, ns, tests...)
 	ing := ingress.NewOrFail(ctx, ctx, ingress.Config{

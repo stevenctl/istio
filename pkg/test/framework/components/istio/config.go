@@ -226,15 +226,6 @@ func DefaultConfig(ctx resource.Context) (Config, error) {
 	return s, nil
 }
 
-// DefaultConfigOrFail calls DefaultConfig and fails t if an error occurs.
-func DefaultConfigOrFail(t test.Failer, ctx resource.Context) Config {
-	cfg, err := DefaultConfig(ctx)
-	if err != nil {
-		t.Fatalf("Get istio config: %v", err)
-	}
-	return cfg
-}
-
 func checkFileExists(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return err

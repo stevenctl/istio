@@ -209,11 +209,12 @@ func TestIngress(t *testing.T) {
 			// Set up secret contain some TLS certs for *.example.com
 			// we will define one for foo.example.com and one for bar.example.com, to ensure both can co-exist
 			credName := "k8s-ingress-secret-foo"
-			ingressutil.CreateIngressKubeSecret(t, ctx, []string{credName}, ingress.TLS, ingressutil.IngressCredentialA)
-			defer ingressutil.DeleteIngressKubeSecret(t, ctx, []string{credName})
+			istioNS := i.Settings().SystemNamespace
+			ingressutil.CreateIngressKubeSecret(t, ctx, []string{credName}, ingress.TLS, ingressutil.IngressCredentialA, istioNS)
+			defer ingressutil.DeleteIngressKubeSecret(t, ctx, []string{credName}, istioNS)
 			credName2 := "k8s-ingress-secret-bar"
-			ingressutil.CreateIngressKubeSecret(t, ctx, []string{credName2}, ingress.TLS, ingressutil.IngressCredentialB)
-			defer ingressutil.DeleteIngressKubeSecret(t, ctx, []string{credName2})
+			ingressutil.CreateIngressKubeSecret(t, ctx, []string{credName2}, ingress.TLS, ingressutil.IngressCredentialB, istioNS)
+			defer ingressutil.DeleteIngressKubeSecret(t, ctx, []string{credName2}, istioNS)
 
 			if err := g.ApplyConfig(ns, `
 apiVersion: networking.k8s.io/v1beta1

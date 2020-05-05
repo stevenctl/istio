@@ -27,7 +27,6 @@ import (
 	"istio.io/istio/pkg/test/framework/components/echo"
 	"istio.io/istio/pkg/test/framework/components/echo/echoboot"
 	"istio.io/istio/pkg/test/framework/components/environment/kube"
-	"istio.io/istio/pkg/test/framework/components/istio"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/resource/environment"
 	"istio.io/istio/pkg/test/util/retry"
@@ -103,7 +102,7 @@ func TestMTLSCertPluginCASecureNaming(t *testing.T) {
 	framework.NewTest(t).
 		RequiresEnvironment(environment.Kube).
 		Run(func(ctx framework.TestContext) {
-			istioCfg := istio.DefaultConfigOrFail(t, ctx)
+			istioCfg := inst.Settings()
 			testNamespace := namespace.NewOrFail(t, ctx, namespace.Config{
 				Prefix: "mtlscert-pluginca-securenaming",
 				Inject: true,
