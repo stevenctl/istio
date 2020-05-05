@@ -49,19 +49,14 @@ type kubeComponent struct {
 	cluster   kube.Cluster
 }
 
-func newKube(ctx resource.Context, cfgIn Config) (Instance, error) {
+func newKube(ctx resource.Context, ist istio.Instance, cfgIn Config) (Instance, error) {
 	c := &kubeComponent{
 		cluster: kube.ClusterOrDefault(cfgIn.Cluster, ctx.Environment()),
 	}
 	c.id = ctx.TrackResource(c)
 
 	// Find the zipkin pod and service, and start forwarding a local port.
-	cfg, err := istio.DefaultConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	fetchFn := c.cluster.NewSinglePodFetch(cfg.SystemNamespace, fmt.Sprintf("app=%s", appName))
+	fetchFn := c.cluster.NewSinglePodFetch(ist.Settings().SystemNamespace, fmt.Sprintf("app=%s", appName))
 	pods, err := c.cluster.WaitUntilPodsAreReady(fetchFn)
 	if err != nil {
 		return nil, err

@@ -15,6 +15,7 @@
 package zipkin
 
 import (
+	"istio.io/istio/pkg/test/framework/components/istio"
 	"testing"
 
 	"istio.io/istio/pkg/test/framework/resource"
@@ -51,18 +52,18 @@ type Trace struct {
 }
 
 // New returns a new instance of zipkin.
-func New(ctx resource.Context, c Config) (i Instance, err error) {
+func New(ctx resource.Context, ist istio.Instance, c Config) (i Instance, err error) {
 	err = resource.UnsupportedEnvironment(ctx.Environment())
 	ctx.Environment().Case(environment.Kube, func() {
-		i, err = newKube(ctx, c)
+		i, err = newKube(ctx, ist, c)
 	})
 	return
 }
 
 // NewOrFail returns a new zipkin instance or fails test.
-func NewOrFail(t *testing.T, ctx resource.Context, c Config) Instance {
+func NewOrFail(t *testing.T, ctx resource.Context, ist istio.Instance, c Config) Instance {
 	t.Helper()
-	i, err := New(ctx, c)
+	i, err := New(ctx, ist, c)
 	if err != nil {
 		t.Fatalf("zipkin.NewOrFail: %v", err)
 	}

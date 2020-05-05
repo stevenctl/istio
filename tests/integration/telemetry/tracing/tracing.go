@@ -74,7 +74,7 @@ func TestSetup(ctx resource.Context) (err error) {
 	if err != nil {
 		return
 	}
-	zipkinInst, err = zipkin.New(ctx, zipkin.Config{})
+	zipkinInst, err = zipkin.New(ctx, ist, zipkin.Config{})
 	if err != nil {
 		return
 	}
