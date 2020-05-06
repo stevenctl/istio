@@ -226,12 +226,13 @@ func defaultConfig(ctx resource.Context) (Config, error) {
 	return s, nil
 }
 
-// ConfigFromContext attempts to find an instance of the istio component in the resource.Context and returns it's configuration
+// ConfigFromContext attempts to find an instance of the istio component in the current context and returns it's config.
+// If there is no istio instance in the context, the default config is returned.
 func ConfigFromContext(ctx resource.Context) (Config, error) {
 	var inst Instance
 	err := ctx.GetResource(&inst)
 	if err != nil {
-		return Config{}, err
+		return defaultConfig(ctx)
 	}
 	return inst.Settings(), err
 }
