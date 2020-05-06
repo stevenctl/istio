@@ -55,7 +55,7 @@ func TestMain(m *testing.M) {
 		RequireEnvironmentVersion("1.18").
 		RequireSingleCluster().
 		Setup(func(ctx resource.Context) (err error) {
-			if g, err = galley.New(ctx, galley.Config{}); err != nil {
+			if g, err = galley.New(ctx, i, galley.Config{}); err != nil {
 				return err
 			}
 			if err := g.ApplyConfigDir(nil, "testdata"); err != nil {

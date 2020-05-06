@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 		RequireSingleCluster().
 		SetupOnEnv(environment.Kube, istio.Setup(&ist, setupConfig)).
 		Setup(func(ctx resource.Context) (err error) {
-			if g, err = galley.New(ctx, galley.Config{}); err != nil {
+			if g, err = galley.New(ctx, ist, galley.Config{}); err != nil {
 				return err
 			}
 			if p, err = pilot.New(ctx, pilot.Config{

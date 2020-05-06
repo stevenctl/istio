@@ -75,7 +75,7 @@ func TestMain(m *testing.M) {
 		Label(label.CustomSetup).
 		SetupOnEnv(environment.Kube, istio.Setup(&i, setupConfig)).
 		Setup(func(ctx resource.Context) (err error) {
-			if g, err = galley.New(ctx, galley.Config{}); err != nil {
+			if g, err = galley.New(ctx, i, galley.Config{}); err != nil {
 				return err
 			}
 			if p, err = pilot.New(ctx, pilot.Config{

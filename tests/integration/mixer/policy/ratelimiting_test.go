@@ -290,7 +290,7 @@ func testsetup(ctx resource.Context) (err error) {
 	if _, err = bookinfo.Deploy(ctx, bookinfo.Config{Namespace: bookinfoNs, Cfg: bookinfo.BookInfo}); err != nil {
 		return
 	}
-	g, err = galley.New(ctx, galley.Config{})
+	g, err = galley.New(ctx, ist, galley.Config{})
 	if err != nil {
 		return
 	}

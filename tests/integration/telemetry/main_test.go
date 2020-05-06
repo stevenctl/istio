@@ -75,7 +75,7 @@ values:
     enabled: true`
 		})).
 		Setup(func(ctx resource.Context) (err error) {
-			if g, err = galley.New(ctx, galley.Config{}); err != nil {
+			if g, err = galley.New(ctx, i, galley.Config{}); err != nil {
 				return err
 			}
 			if p, err = pilot.New(ctx, pilot.Config{

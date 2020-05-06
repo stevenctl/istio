@@ -28,12 +28,14 @@ import (
 	"istio.io/istio/tests/integration/security/util/reachability"
 )
 
+var inst istio.Instance
+
 func TestMain(m *testing.M) {
 	framework.
 		NewSuite("cni", m).
 		RequireEnvironment(environment.Kube).
 		RequireSingleCluster().
-		SetupOnEnv(environment.Kube, istio.Setup(nil, func(cfg *istio.Config) {
+		SetupOnEnv(environment.Kube, istio.Setup(&inst, func(cfg *istio.Config) {
 			cfg.ControlPlaneValues = `
 components:
   cni:
@@ -55,7 +57,7 @@ components:
 func TestCNIReachability(t *testing.T) {
 	framework.NewTest(t).
 		Run(func(ctx framework.TestContext) {
-			g, err := galley.New(ctx, galley.Config{})
+			g, err := galley.New(ctx, inst, galley.Config{})
 			if err != nil {
 				ctx.Fatal(err)
 			}

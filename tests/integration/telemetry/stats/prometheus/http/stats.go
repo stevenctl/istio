@@ -95,7 +95,7 @@ func TestStatsFilter(t *testing.T) {
 
 // TestSetup set up bookinfo app for stats testing.
 func TestSetup(ctx resource.Context) (err error) {
-	galInst, err = galley.New(ctx, galley.Config{})
+	galInst, err = galley.New(ctx, ist, galley.Config{})
 	if err != nil {
 		return
 	}

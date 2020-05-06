@@ -49,7 +49,7 @@ func TestMain(m *testing.M) {
 		Label(label.CustomSetup).
 		SetupOnEnv(environment.Kube, istio.Setup(&inst, nil, cert.CreateCASecret)).
 		Setup(func(ctx resource.Context) (err error) {
-			if g, err = galley.New(ctx, galley.Config{}); err != nil {
+			if g, err = galley.New(ctx, inst, galley.Config{}); err != nil {
 				return err
 			}
 			if p, err = pilot.New(ctx, pilot.Config{

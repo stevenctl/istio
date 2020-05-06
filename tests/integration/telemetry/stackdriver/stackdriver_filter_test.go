@@ -202,7 +202,7 @@ func setupConfig(cfg *istio.Config) {
 }
 
 func testSetup(ctx resource.Context) (err error) {
-	galInst, err = galley.New(ctx, galley.Config{})
+	galInst, err = galley.New(ctx, ist, galley.Config{})
 	if err != nil {
 		return
 	}

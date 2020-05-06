@@ -42,7 +42,7 @@ var (
 	_ io.Closer = &kubeComponent{}
 )
 
-func newKube(ctx resource.Context, cfg Config) (Instance, error) {
+func newKube(ctx resource.Context, istio istio.Instance, cfg Config) (Instance, error) {
 
 	dir, err := ctx.CreateTmpDirectory("galley-workdir")
 	if err != nil {
@@ -57,12 +57,7 @@ func newKube(ctx resource.Context, cfg Config) (Instance, error) {
 	}
 	n.id = ctx.TrackResource(n)
 
-	// TODO: This should be obtained from an Istio deployment.
-	c, err := istio.DefaultConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ns := c.ConfigNamespace
+	ns := istio.Settings().ConfigNamespace
 
 	if !cfg.CreateClient {
 		return n, nil
