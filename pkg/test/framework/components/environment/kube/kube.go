@@ -68,6 +68,19 @@ func New(ctx resource.Context, s *Settings) (resource.Environment, error) {
 	return e, nil
 }
 
+// CustomSettingsFactory allows settings to be customized before the kubernetes environment
+// and cluster accessors are initialized.
+func CustomSettingsFactory(setup SetupSettingsFunc) resource.EnvironmentFactory {
+	return func(name string, ctx resource.Context) (resource.Environment, error) {
+		s, err := NewSettingsFromCommandLine()
+		if err != nil {
+			return nil, err
+		}
+		setup(s)
+		return New(ctx, s)
+	}
+}
+
 func (e *Environment) EnvironmentName() environment.Name {
 	return environment.Kube
 }
