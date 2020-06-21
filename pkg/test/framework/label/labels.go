@@ -28,13 +28,17 @@ const (
 
 	// Multicluster indicates that the test requires a multicluster configuration.
 	Multicluster Instance = "multicluster"
+
+	// Performance indicates the test or suite will be used for benchmarking.
+	Performance Instance = "performance"
 )
 
 var all = NewSet(
 	Postsubmit,
 	CustomSetup,
 	Flaky,
-	Multicluster)
+	Multicluster,
+	Performance)
 
 // Find the label with the given name
 func Find(name string) (Instance, bool) {

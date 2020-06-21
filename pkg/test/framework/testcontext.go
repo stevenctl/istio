@@ -31,17 +31,9 @@ import (
 	"istio.io/istio/pkg/test/scopes"
 )
 
-// TestContext is a test-level context that can be created as part of test executing tests.
-type TestContext interface {
+type context interface {
 	resource.Context
 	test.Failer
-
-	// NewSubTest creates a new sub-test under the current running Test. The lifecycle of a sub-Test is scoped to the
-	// parent. Calls to Done() will block until all children are also Done(). When Run, sub-Tests will automatically
-	// create their own Golang *testing.T with the name provided.
-	//
-	// If this TestContext was not created by a Test or if that Test is not running, this method will panic.
-	NewSubTest(name string) *Test
 
 	// WorkDir allocated for this test.
 	WorkDir() string
@@ -52,16 +44,9 @@ type TestContext interface {
 	// CreateTmpDirectoryOrFail creates a new temporary directory with the given prefix in the workdir, or fails the test.
 	CreateTmpDirectoryOrFail(prefix string) string
 
-	// RequireOrSkip skips the test if the environment is not as expected.
-	RequireOrSkip(envName environment.Name)
-
 	// WhenDone runs the given function when the test context completes.
 	// This function may not (safely) access the test context.
 	WhenDone(fn func() error)
-
-	// Done should be called when this context is no longer needed. It triggers the asynchronous cleanup of any
-	// allocated resources.
-	Done()
 
 	// Methods for interacting with the underlying *testing.T.
 	Error(args ...interface{})
@@ -74,6 +59,27 @@ type TestContext interface {
 	SkipNow()
 	Skipf(format string, args ...interface{})
 	Skipped() bool
+}
+
+// TestContext is a test-level context that can be created as part of test executing tests.
+type TestContext interface {
+	context
+
+	// NewSubTest creates a new sub-test under the current running Test. The lifecycle of a sub-Test is scoped to the
+	// parent. Calls to Done() will block until all children are also Done(). When Run, sub-Tests will automatically
+	// create their own Golang *testing.T with the name provided.
+	//
+	// If this TestContext was not created by a Test or if that Test is not running, this method will panic.
+	NewSubTest(name string) *Test
+
+	// RequireOrSkip skips the test if the environment is not as expected.
+	RequireOrSkip(envName environment.Name)
+
+	// Done should be called when this context is no longer needed. It triggers the asynchronous cleanup of any
+	// allocated resources.
+	Done()
+
+
 }
 
 var _ TestContext = &testContext{}
