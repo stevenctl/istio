@@ -372,6 +372,11 @@ func (configgen *ConfigGeneratorImpl) createGatewayHTTPFilterChainOpts(
 		}
 	}
 
+	var sniHosts []string
+	if node.MergedGateway != nil && node.MergedGateway.SNIHostsByServer != nil {
+		sniHosts = node.MergedGateway.SNIHostsByServer[server]
+	}
+
 	// Build a filter chain for the HTTPS server
 	// We know that this is a HTTPS server because this function is called only for ports of type HTTP/HTTPS
 	// where HTTPS server's TLS mode is not passthrough and not nil
@@ -379,7 +384,7 @@ func (configgen *ConfigGeneratorImpl) createGatewayHTTPFilterChainOpts(
 		// This works because we validate that only HTTPS servers can have same port but still different port names
 		// and that no two non-HTTPS servers can be on same port or share port names.
 		// Validation is done per gateway and also during merging
-		sniHosts:   node.MergedGateway.SNIHostsByServer[server],
+		sniHosts:   sniHosts,
 		tlsContext: buildGatewayListenerTLSContext(server, sdsPath, node.Metadata),
 		httpOpts: &httpListenerOpts{
 			rds:              routeName,
