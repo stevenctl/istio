@@ -86,14 +86,22 @@ func TestServiceEntryWorkloadSelectors(t *testing.T) {
 				Scheme:   scheme.HTTP,
 				Count:    10,
 			})
-
-			c := map[string]int{}
+			responseCount := map[string]int{}
 			for _, res := range res {
-				c[res.Version]++
+				responseCount[res.Version]++
 			}
 
-			if len(c) != 2 {
-				ctx.Fatalf("expected both vm and pod to be reached, versions hit: %v", c)
+			tests := map[string]echo.Instance{
+				"Pod":           pod,
+				"WorkloadEntry": vm,
+			}
+
+			for name, tt := range tests {
+				ctx.NewSubTest(name).Run(func(ctx framework.TestContext) {
+					if _, ok := responseCount[tt.Config().Version]; !ok {
+						ctx.Fail()
+					}
+				})
 			}
 
 		})
