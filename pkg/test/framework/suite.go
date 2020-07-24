@@ -294,7 +294,7 @@ func (s *suiteImpl) run() (errLevel int) {
 
 	// Before starting, check whether the current set of labels & label selectors will ever allow us to run tests.
 	// if not, simply exit now.
-	if ctx.Settings().Selector.Excludes(s.labels) {
+	if !ctx.Settings().Selector.Selects(s.labels) {
 		s.Skip(fmt.Sprintf("Label mismatch: labels=%v, selector=%v",
 			s.labels,
 			ctx.Settings().Selector))
