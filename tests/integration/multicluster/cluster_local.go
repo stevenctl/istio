@@ -23,7 +23,6 @@ import (
 	"istio.io/istio/pkg/test/framework/components/echo/echoboot"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/features"
-	"istio.io/istio/pkg/test/framework/label"
 )
 
 // ClusterLocalTest tests that traffic works within a local cluster while in a multicluster configuration
@@ -37,7 +36,6 @@ func ClusterLocalTest(t *testing.T, clusterLocalNS namespace.Instance, features 
 				for i := range clusters {
 					i := i
 					ctx.NewSubTest(fmt.Sprintf("cluster-%d cluster local", i)).
-						Label(label.Multicluster).
 						RunParallel(func(ctx framework.TestContext) {
 							local := clusters[i]
 

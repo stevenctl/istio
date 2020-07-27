@@ -23,13 +23,11 @@ import (
 	"istio.io/istio/pkg/test/framework/components/echo/echoboot"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/features"
-	"istio.io/istio/pkg/test/framework/label"
 )
 
 // ReachabilityTest tests that services in 2 different clusters can talk to each other.
 func ReachabilityTest(t *testing.T, ns namespace.Instance, features ...features.Feature) {
 	framework.NewTest(t).
-		Label(label.Multicluster).
 		Features(features...).
 		Run(func(ctx framework.TestContext) {
 			ctx.NewSubTest("reachability").

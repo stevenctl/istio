@@ -22,7 +22,6 @@ import (
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/istio"
 	"istio.io/istio/pkg/test/framework/components/namespace"
-	"istio.io/istio/pkg/test/framework/label"
 )
 
 var (
@@ -34,7 +33,6 @@ var (
 func TestMain(m *testing.M) {
 	framework.
 		NewSuite(m).
-		Label(label.Multicluster).
 		RequireMinClusters(2).
 		Setup(multicluster.Setup(&controlPlaneValues, &clusterLocalNS, &mcReachabilityNS)).
 		Setup(istio.Setup(&ist, func(cfg *istio.Config) {

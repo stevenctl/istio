@@ -31,7 +31,6 @@ import (
 // for multicluster traffic.
 func TelemetryTest(t *testing.T, ns namespace.Instance, features ...features.Feature) {
 	framework.NewTest(t).
-		Label(label.Multicluster).
 		Features(features...).
 		Run(func(ctx framework.TestContext) {
 			ctx.NewSubTest("telemetry").
