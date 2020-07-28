@@ -32,6 +32,7 @@ import (
 	"github.com/howeyc/fsnotify"
 
 	"istio.io/api/label"
+	labeltemp "istio.io/istio/pilot/pkg/labeltemp"
 
 	"istio.io/api/annotation"
 	meshconfig "istio.io/api/mesh/v1alpha1"
@@ -557,17 +558,43 @@ func createPatch(pod *corev1.Pod, prevStatus *SidecarInjectionStatus, revision s
 	patch = append(patch, updateAnnotation(pod.Annotations, annotations)...)
 
 	canonicalSvc, canonicalRev := extractCanonicalServiceLabels(pod.Labels, workloadName)
-	patch = append(patch, addLabels(pod.Labels, map[string]string{
+	patchLabels := map[string]string{
 		label.TLSMode:                                model.IstioMutualTLSModeLabel,
 		model.IstioCanonicalServiceLabelName:         canonicalSvc,
 		label.IstioRev:                               revision,
-		model.IstioCanonicalServiceRevisionLabelName: canonicalRev})...)
+		model.IstioCanonicalServiceRevisionLabelName: canonicalRev,
+	}
+	_, network := topologyValues(sic)
+	if network != "" {
+		// only added if if not already set
+		patchLabels[labeltemp.IstioNetwork] = network
+	}
 
+	patch = append(patch, addLabels(pod.Labels, patchLabels)...)
 	if rewrite {
 		patch = append(patch, createProbeRewritePatch(pod.Annotations, &pod.Spec, sic, mesh.GetDefaultConfig().GetStatusPort())...)
 	}
 
 	return json.Marshal(patch)
+}
+
+// topologyValues will find the value of ISTIO_META_NETWORK in the spec or return a zero-value
+func topologyValues(sic *SidecarInjectionSpec) (cluster string, network string) {
+	// TODO should we just return the values used to populate the template from InjectionData?
+	for _, c := range sic.Containers {
+		for _, e := range c.Env {
+			if e.Name == "ISTIO_META_NETWORK" {
+				network = e.Value
+			}
+			if e.Value == "ISTIO_META_CLUSTER_ID" {
+				cluster = e.Value
+			}
+		}
+		if network != "" && cluster != "" {
+			break
+		}
+	}
+	return cluster, network
 }
 
 func enablePrometheusMerge(mesh *meshconfig.MeshConfig, anno map[string]string) bool {

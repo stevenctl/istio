@@ -30,6 +30,8 @@ import (
 	"strings"
 	"text/template"
 
+	"istio.io/istio/pkg/util/jsonmap"
+
 	"github.com/ghodss/yaml"
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/gogo/protobuf/proto"
@@ -38,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"istio.io/api/label"
+	labeltemp "istio.io/istio/pilot/pkg/labeltemp"
 
 	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/config/validation"
@@ -464,7 +467,7 @@ func InjectionData(sidecarTemplate, valuesConfig, version string, typeMetadata *
 		return nil, "", err
 	}
 
-	values := map[string]interface{}{}
+	values := jsonmap.Map{}
 	if err := yaml.Unmarshal([]byte(valuesConfig), &values); err != nil {
 		log.Infof("Failed to parse values config: %v [%v]\n", err, valuesConfig)
 		return nil, "", multierror.Prefix(err, "could not parse configuration values:")
@@ -477,6 +480,24 @@ func InjectionData(sidecarTemplate, valuesConfig, version string, typeMetadata *
 			return nil, "", merr
 		}
 	}
+
+	cluster := values.Map("global").Map("multiCluster").String("clusterName")
+	network := values.Map("global").String("network")
+	// for istiod-remote we use the injection URL to get the cluster and network names
+	if c, n := splitPath(path); c != "" && n != "" {
+		cluster, network = c, n
+	}
+	// explicit label takes highest precedence
+	if n, ok := metadata.Labels[labeltemp.IstioNetwork]; ok {
+		network = n
+	}
+	if cluster != "" {
+		values.Ensure("global").Ensure("multiCluster")["clusterName"] = cluster
+	}
+	if network != "" {
+		values.Ensure("global")["network"] = network
+	}
+
 	data := SidecarTemplateData{
 		TypeMeta:       typeMetadata,
 		DeploymentMeta: deploymentMetadata,
@@ -545,9 +566,6 @@ func InjectionData(sidecarTemplate, valuesConfig, version string, typeMetadata *
 
 	// set sidecar --concurrency
 	applyConcurrency(sic.Containers)
-
-	// overwrite cluster name and network if needed
-	overwriteClusterInfo(sic.Containers, path)
 
 	status := &SidecarInjectionStatus{Version: version}
 	for _, c := range sic.InitContainers {
@@ -1109,38 +1127,12 @@ func rewriteCniPodSpec(annotations map[string]string, spec *SidecarInjectionSpec
 	}
 }
 
-// overwriteClusterInfo updates cluster name and network from url path
-// This is needed when webconfig config runs on a different cluster than webhook
-func overwriteClusterInfo(containers []corev1.Container, path string) {
+// splitPath gets the clsuter name and network from the injection URL path
+func splitPath(path string) (clusterName string, clusterNetwork string) {
 	res := strings.Split(path, "/")
 	if len(res) >= 5 {
-		// if len is less than 5, not enough length for /cluster/X/net/Y
-		clusterName, clusterNetwork := "", ""
-		clusterName = res[len(res)-3]
-		clusterNetwork = res[len(res)-1]
-
-		log.Debugf("Updating cluster info based on clusterName: %s clusterNetwork: %s\n", clusterName, clusterNetwork)
-
-		for i, c := range containers {
-			if c.Name == ProxyContainerName {
-				updateClusterInfo(&containers[i], clusterName, clusterNetwork)
-			}
-		}
+		return res[len(res)-3], res[len(res)-1]
 	}
-
-}
-
-func updateClusterInfo(container *corev1.Container, clusterName, clusterNetwork string) {
-	envVars := make([]corev1.EnvVar, 0)
-	for _, env := range container.Env {
-		if env.Name != "ISTIO_META_CLUSTER_ID" && env.Name != "ISTIO_META_NETWORK" {
-			envVars = append(envVars, env)
-		}
-	}
-
-	log.Debugf("Appending env ISTIO_META_CLUSTER_ID: %s and ISTIO_META_NETWORK: %s\n", clusterName, clusterNetwork)
-	envVars = append(envVars,
-		corev1.EnvVar{Name: "ISTIO_META_CLUSTER_ID", Value: clusterName, ValueFrom: nil},
-		corev1.EnvVar{Name: "ISTIO_META_NETWORK", Value: clusterNetwork, ValueFrom: nil})
-	container.Env = envVars
+	// if len is less than 5, not enough length for /cluster/X/net/Y
+	return "", ""
 }
