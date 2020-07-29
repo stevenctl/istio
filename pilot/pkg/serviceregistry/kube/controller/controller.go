@@ -713,8 +713,8 @@ func (c *Controller) collectWorkloadInstanceEndpoints(svc *model.Service) []*mod
 // TODO: this code does not return k8s service instances when the proxy's IP is a workload entry
 // To tackle this, we need a ip2instance map like what we have in service entry.
 func (c *Controller) GetProxyServiceInstances(proxy *model.Proxy) ([]*model.ServiceInstance, error) {
-
 	out := make([]*model.ServiceInstance, 0)
+
 	if len(proxy.IPAddresses) > 0 {
 		// only need to fetch the corresponding pod through the first IP, although there are multiple IP scenarios,
 		// because multiple ips belong to the same pod
@@ -729,12 +729,11 @@ func (c *Controller) GetProxyServiceInstances(proxy *model.Proxy) ([]*model.Serv
 			}
 		} else if pod != nil {
 			// for split horizon EDS k8s multi cluster, in case there are pods of the same ip across clusters,
-			// which can happen when multi clusters using same pod cidr.
-			// As we have proxy Network meta, compare it with the network which endpoint belongs to,
-			// if they are not same, ignore the pod, because the pod is in another cluster.
-			if proxy.Metadata.Network != c.endpointNetwork(proxyIP) {
+			// which can happen when multi clusters using same pod cidr. ignore the pod if it isn't in this cluster.
+			if proxy.Metadata.ClusterID != c.clusterID {
 				return out, nil
 			}
+
 			// 1. find proxy service by label selector, if not any, there may exist headless service without selector
 			// failover to 2
 			if services, err := getPodServices(c.serviceLister, pod); err == nil && len(services) > 0 {
@@ -935,6 +934,12 @@ func (c *Controller) getProxyServiceInstancesFromMetadata(proxy *model.Proxy) ([
 		for tp, svcPort := range tps {
 			// consider multiple IP scenarios
 			for _, ip := range proxy.IPAddresses {
+				var network string
+				if proxy.Metadata.Network != "" {
+					network = proxy.Metadata.Network
+				} else {
+					network = c.endpointNetwork(ip)
+				}
 				// Construct the ServiceInstance
 				out = append(out, &model.ServiceInstance{
 					Service:     modelService,
@@ -946,7 +951,7 @@ func (c *Controller) getProxyServiceInstancesFromMetadata(proxy *model.Proxy) ([
 						// Kubernetes service will only have a single instance of labels, and we return early if there are no labels.
 						Labels:         proxy.Metadata.Labels,
 						ServiceAccount: svcAccount,
-						Network:        c.endpointNetwork(ip),
+						Network:        network,
 						Locality: model.Locality{
 							Label:     util.LocalityToString(proxy.Locality),
 							ClusterID: c.clusterID,
