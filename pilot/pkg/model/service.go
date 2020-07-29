@@ -396,7 +396,7 @@ type IstioEndpoint struct {
 
 // ServiceAttributes represents a group of custom attributes of the service.
 type ServiceAttributes struct {
-	// ServiceRegistry indicates the backing service registry system where this service
+	// ServiceRegistry indicates the type of backing service registry system where this service
 	// was sourced from.
 	// TODO: move the ServiceRegistry type from platform.go to model
 	ServiceRegistry string
@@ -421,6 +421,15 @@ type ServiceAttributes struct {
 	// Used by the aggregator to aggregate the Attributes.ClusterExternalAddresses
 	// for clusters where the service resides
 	ClusterExternalAddresses map[string][]string
+
+	// NetworkExternalAddresses is a mapping between a network name and the external
+	// address(es) to access the service from outside the network. Similar to ClusterExternalAddresses.
+	NetworkExternalAddresses map[string][]string
+
+	// ClusterNetwork is the network for instances of the service on a given cluster. This is not guaranteed
+	// to the be default network for a cluster. A service can be labeled to override it's network.
+	// TODO this feels hacky - the service really is on the network of it's selected workloads; only necessary for NodePort gateways
+	ClusterNetwork map[string]string
 
 	// ClusterExternalPorts is a mapping between a cluster name and the service port
 	// to node port mappings for a given service. When accessing the service via

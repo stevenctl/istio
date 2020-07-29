@@ -36,6 +36,33 @@ import (
 // If no pods are provided, client will be used to fetch all the pods in a namespace.
 type podDumper func(a kube.ExtendedClient, workDir string, namespace string, pods ...kubeApiCore.Pod)
 
+// DumpServices dumps the service state for all pods in the given namespace.
+func DumpServices(a kube.ExtendedClient, workDir, namespace string) {
+	svcList, err := a.CoreV1().Services(namespace).List(context.TODO(), kubeApiMeta.ListOptions{})
+	if err != nil {
+		scopes.Framework.Errorf("Error getting Service list via kubectl: %v", err)
+		return
+	}
+
+	marshaler := jsonpb.Marshaler{
+		Indent: "  ",
+	}
+
+	for _, svc := range svcList.Items {
+		str, err := marshaler.MarshalToString(&svc)
+		if err != nil {
+			scopes.Framework.Errorf("Error marshaling pod state for output: %v", err)
+			continue
+		}
+
+		outPath := path.Join(workDir, fmt.Sprintf("svc_%s_%s.yaml", namespace, svc.Name))
+
+		if err := ioutil.WriteFile(outPath, []byte(str), os.ModePerm); err != nil {
+			scopes.Framework.Infof("Error writing out pod state to file: %v", err)
+		}
+	}
+}
+
 // DumpPods runs each dumper with all the pods in the given namespace.
 // If no dumpers are provided, their resource state, events, container logs and Envoy information will be dumped.
 func DumpPods(a kube.ExtendedClient, workDir, namespace string, dumpers ...podDumper) {

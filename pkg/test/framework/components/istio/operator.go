@@ -162,6 +162,7 @@ func (i *operatorComponent) Dump() {
 			return
 		}
 		kube2.DumpPods(cluster, d, i.settings.SystemNamespace)
+		kube2.DumpServices(cluster, d, i.settings.SystemNamespace)
 	}
 }
 
@@ -554,19 +555,10 @@ func meshNetworkSettings(cfg Config, environment *kube.Environment) *meshAPI.Mes
 		Port: 443,
 	}}
 
-	for networkName, clusters := range environment.ClustersByNetwork() {
-		network := &meshAPI.Network{
-			Endpoints: make([]*meshAPI.Network_NetworkEndpoints, len(clusters)),
-			Gateways:  defaultGateways,
+	for networkName := range environment.ClustersByNetwork() {
+		meshNetworks.Networks[networkName] = &meshAPI.Network{
+			Gateways: defaultGateways,
 		}
-		for i, cluster := range clusters {
-			network.Endpoints[i] = &meshAPI.Network_NetworkEndpoints{
-				Ne: &meshAPI.Network_NetworkEndpoints_FromRegistry{
-					FromRegistry: cluster.Name(),
-				},
-			}
-		}
-		meshNetworks.Networks[networkName] = network
 	}
 
 	return &meshNetworks

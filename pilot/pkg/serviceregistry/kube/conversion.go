@@ -51,7 +51,7 @@ func convertPort(port coreV1.ServicePort) *model.Port {
 	}
 }
 
-func ConvertService(svc coreV1.Service, domainSuffix string, clusterID string) *model.Service {
+func ConvertService(svc coreV1.Service, domainSuffix, clusterID, networkID string) *model.Service {
 	addr, external := constants.UnspecifiedIP, ""
 	if svc.Spec.ClusterIP != "" && svc.Spec.ClusterIP != coreV1.ClusterIPNone {
 		addr = svc.Spec.ClusterIP
@@ -116,6 +116,13 @@ func ConvertService(svc coreV1.Service, domainSuffix string, clusterID string) *
 		},
 	}
 
+	if networkID != "" {
+		// TODO(landow) ClusterNetwork is a hack for letting NodePort services set addresses
+		// TODO(cont)   for the proper network. We should tie Services to a network in a more
+		// TODO(cont)   intelligent way.
+		istioService.Attributes.ClusterNetwork = map[string]string{clusterID: networkID}
+	}
+
 	switch svc.Spec.Type {
 	case coreV1.ServiceTypeNodePort:
 		if _, ok := svc.Annotations[NodeSelectorAnnotation]; !ok {
@@ -128,7 +135,7 @@ func ConvertService(svc coreV1.Service, domainSuffix string, clusterID string) *
 			portMap[uint32(p.Port)] = uint32(p.NodePort)
 		}
 		istioService.Attributes.ClusterExternalPorts = map[string]map[uint32]uint32{clusterID: portMap}
-		// address mappings will be done elsewhere
+		// address mappings will be done elsewhere (see updateServiceExternalAddr)
 	case coreV1.ServiceTypeLoadBalancer:
 		if len(svc.Status.LoadBalancer.Ingress) > 0 {
 			var lbAddrs []string
@@ -146,6 +153,7 @@ func ConvertService(svc coreV1.Service, domainSuffix string, clusterID string) *
 			}
 			if len(lbAddrs) > 0 {
 				istioService.Attributes.ClusterExternalAddresses = map[string][]string{clusterID: lbAddrs}
+				istioService.Attributes.NetworkExternalAddresses = map[string][]string{networkID: lbAddrs}
 			}
 		}
 	}

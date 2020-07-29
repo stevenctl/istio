@@ -1539,7 +1539,7 @@ func (ps *PushContext) initMeshNetworks() {
 		gateways := []*Gateway{}
 
 		for _, gw := range gws {
-			gateways = append(gateways, getGatewayAddresses(gw, registryNames, ps.ServiceDiscovery)...)
+			gateways = append(gateways, getGatewayAddresses(network, gw, registryNames, ps.ServiceDiscovery)...)
 		}
 
 		log.Debugf("Endpoints from registries %v on network %v reachable through %d gateways",
@@ -1607,7 +1607,28 @@ func getNetworkRegistries(network *meshconfig.Network) []string {
 	return registryNames
 }
 
-func getGatewayAddresses(gw *meshconfig.Network_IstioNetworkGateway, registryNames []string, discovery ServiceDiscovery) []*Gateway {
+// portForAddress builds a mapping of address to port using ClusterExternalAddresses to tie
+// an address back to its cluster so we can get the nodeports for the speicifc cluster.
+func portForAddress(svc *Service, port uint32) map[string]uint32 {
+	out := map[string]uint32{}
+	if svc.Attributes.ClusterExternalPorts == nil || svc.Attributes.ClusterExternalAddresses == nil {
+		return out
+	}
+	for c, addr := range svc.Attributes.ClusterExternalAddresses {
+		port := port
+		if cpm, ok := svc.Attributes.ClusterExternalPorts[c]; ok {
+			if mapped, ok := cpm[port]; ok {
+				port = mapped
+			}
+		}
+		for _, addr := range addr {
+			out[addr] = port
+		}
+	}
+	return out
+}
+
+func getGatewayAddresses(network string, gw *meshconfig.Network_IstioNetworkGateway, registryNames []string, discovery ServiceDiscovery) []*Gateway {
 	// First, if a gateway address is provided in the configuration use it. If the gateway address
 	// in the config was a hostname it got already resolved and replaced with an IP address
 	// when loading the config
@@ -1621,28 +1642,27 @@ func getGatewayAddresses(gw *meshconfig.Network_IstioNetworkGateway, registryNam
 		if svc == nil {
 			return nil
 		}
-		// No need lock here as the service returned is a new one
-		if svc.Attributes.ClusterExternalAddresses != nil {
-			var gateways []*Gateway
-			for _, clusterName := range registryNames {
-				remotePort := gw.Port
-				// check if we have node port mappings
-				if svc.Attributes.ClusterExternalPorts != nil {
-					if nodePortMap, exists := svc.Attributes.ClusterExternalPorts[clusterName]; exists {
-						// what we now have is a service port. If there is a mapping for cluster external ports,
-						// look it up and get the node port for the remote port
-						if nodePort, exists := nodePortMap[remotePort]; exists {
-							remotePort = nodePort
-						}
-					}
-				}
-				ips := svc.Attributes.ClusterExternalAddresses[clusterName]
-				for _, ip := range ips {
-					gateways = append(gateways, &Gateway{ip, remotePort})
-				}
-			}
-			return gateways
+
+		ips := sets.NewSet()
+		if svc.Attributes.NetworkExternalAddresses != nil {
+			ips.Insert(svc.Attributes.NetworkExternalAddresses[network]...)
 		}
+		if svc.Attributes.ClusterExternalAddresses != nil {
+			for _, clusterName := range registryNames {
+				ips.Insert(svc.Attributes.ClusterExternalAddresses[clusterName]...)
+			}
+		}
+		portMap := portForAddress(svc, gw.Port)
+
+		gateways := make([]*Gateway, 0, len(ips))
+		for _, ip := range ips.UnsortedList() {
+			port := gw.Port
+			if mappedPort, ok := portMap[ip]; ok {
+				port = mappedPort
+			}
+			gateways = append(gateways, &Gateway{Addr: ip, Port: port})
+		}
+		return gateways
 	}
 
 	return nil

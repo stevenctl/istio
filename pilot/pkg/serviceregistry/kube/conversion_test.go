@@ -34,6 +34,7 @@ import (
 var (
 	domainSuffix = "company.com"
 	clusterID    = "test-cluster"
+	networkID    = "test-network"
 )
 
 func TestConvertProtocol(t *testing.T) {
@@ -171,7 +172,7 @@ func TestServiceConversion(t *testing.T) {
 		},
 	}
 
-	service := ConvertService(localSvc, domainSuffix, clusterID)
+	service := ConvertService(localSvc, domainSuffix, clusterID, networkID)
 	if service == nil {
 		t.Fatalf("could not convert service")
 	}
@@ -246,7 +247,7 @@ func TestServiceConversionWithEmptyServiceAccountsAnnotation(t *testing.T) {
 		},
 	}
 
-	service := ConvertService(localSvc, domainSuffix, clusterID)
+	service := ConvertService(localSvc, domainSuffix, clusterID, networkID)
 	if service == nil {
 		t.Fatalf("could not convert service")
 	}
@@ -279,7 +280,7 @@ func TestExternalServiceConversion(t *testing.T) {
 		},
 	}
 
-	service := ConvertService(extSvc, domainSuffix, clusterID)
+	service := ConvertService(extSvc, domainSuffix, clusterID, networkID)
 	if service == nil {
 		t.Fatalf("could not convert external service")
 	}
@@ -323,7 +324,7 @@ func TestExternalClusterLocalServiceConversion(t *testing.T) {
 
 	domainSuffix := "cluster.local"
 
-	service := ConvertService(extSvc, domainSuffix, clusterID)
+	service := ConvertService(extSvc, domainSuffix, clusterID, networkID)
 	if service == nil {
 		t.Fatalf("could not convert external service")
 	}
@@ -384,13 +385,16 @@ func TestLBServiceConversion(t *testing.T) {
 		},
 	}
 
-	service := ConvertService(extSvc, domainSuffix, clusterID)
+	service := ConvertService(extSvc, domainSuffix, clusterID, networkID)
 	if service == nil {
 		t.Fatalf("could not convert external service")
 	}
 
 	if len(service.Attributes.ClusterExternalAddresses[clusterID]) == 0 {
-		t.Fatalf("no load balancer addresses found")
+		t.Fatalf("no load balancer addresses found by cluster")
+	}
+	if len(service.Attributes.NetworkExternalAddresses[networkID]) == 0 {
+		t.Fatalf("no load balancer addresses found by network")
 	}
 
 	for i, addr := range addresses {
@@ -402,7 +406,11 @@ func TestLBServiceConversion(t *testing.T) {
 		}
 		got := service.Attributes.ClusterExternalAddresses[clusterID][i]
 		if got != want {
-			t.Fatalf("Expected address %s but got %s", want, got)
+			t.Fatalf("Expected address %s ClusterExternalAddresses but got %s", want, got)
+		}
+		got = service.Attributes.NetworkExternalAddresses[networkID][i]
+		if got != want {
+			t.Fatalf("Expected address %s NetworkExternalAddresses but got %s", want, got)
 		}
 	}
 }

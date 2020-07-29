@@ -188,6 +188,17 @@ func (c *Controller) GetService(hostname host.Name) (*model.Service, error) {
 				}
 				out.Attributes.ClusterExternalAddresses[r.Cluster()] = externalAddrs
 			}
+			networkExternalAddrs := service.Attributes.NetworkExternalAddresses
+			if len(networkExternalAddrs) > 0 {
+				if out.Attributes.ClusterExternalAddresses == nil {
+					out.Attributes.NetworkExternalAddresses = make(map[string][]string)
+				}
+				for net, addrs := range service.Attributes.NetworkExternalAddresses {
+					// append; multiple clusters can have the same service
+					out.Attributes.NetworkExternalAddresses[net] = append(out.Attributes.NetworkExternalAddresses[net], addrs...)
+				}
+			}
+
 			externalPorts := service.Attributes.ClusterExternalPorts[r.Cluster()]
 			if len(externalPorts) > 0 {
 				if out.Attributes.ClusterExternalPorts == nil {

@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	label "istio.io/istio/pilot/pkg/labeltemp"
+
 	"github.com/yl2chen/cidranger"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -295,8 +297,14 @@ func (c *Controller) onServiceEvent(curr interface{}, event model.Event) error {
 	}
 
 	log.Debugf("Handle event %s for service %s in namespace %s", event, svc.Name, svc.Namespace)
-
-	svcConv := kube.ConvertService(*svc, c.domainSuffix, c.clusterID)
+	networkID := svc.GetLabels()[label.IstioNetwork]
+	if networkID == "" {
+		networkID = c.networkForRegistry
+	}
+	svcConv := kube.ConvertService(*svc, c.domainSuffix, c.clusterID, networkID)
+	if svc.Spec.Type == v1.ServiceTypeLoadBalancer {
+		log.Infof("generated %d addresses for %s in %s on %s", len(svcConv.Attributes.NetworkExternalAddresses), svc.Name, c.clusterID, networkID)
+	}
 	switch event {
 	case model.EventDelete:
 		c.Lock()
@@ -528,6 +536,9 @@ func (c *Controller) updateServiceExternalAddr(svcs ...*model.Service) bool {
 				extAddresses = append(extAddresses, n.address)
 			}
 			svc.Attributes.ClusterExternalAddresses = map[string][]string{c.clusterID: extAddresses}
+			if nw, ok := svc.Attributes.ClusterNetwork[c.clusterID]; ok && nw != "" {
+				svc.Attributes.NetworkExternalAddresses = map[string][]string{nw: extAddresses}
+			}
 		} else {
 			var nodeAddresses []string
 			for _, n := range c.nodeInfoMap {

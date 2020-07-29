@@ -10,6 +10,9 @@ metadata:
     {{ $key }}: {{ $val | quote }}
     {{- end }}
   labels:
+{{- if .Values.global.network }}
+    topology.istio.io/network: {{ .Values.global.network }}
+{{- end }}
 {{ $gateway.labels | toYaml | indent 4 }}
     release: {{ .Release.Name }}
 spec:
