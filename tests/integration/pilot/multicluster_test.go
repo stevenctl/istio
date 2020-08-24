@@ -16,11 +16,13 @@
 package pilot
 
 import (
+	"fmt"
 	"testing"
 
+	"istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/echo"
-	"istio.io/istio/pkg/test/framework/label"
+	"istio.io/istio/pkg/test/framework/features"
 	"istio.io/istio/pkg/test/framework/resource"
 )
 
@@ -32,7 +34,6 @@ func TestClusterLocalService(t *testing.T) {
 				for _, c := range ctx.Clusters() {
 					c := c
 					ctx.NewSubTest(c.Name()).
-						Label(label.Multicluster).
 						Run(func(ctx framework.TestContext) {
 							local := apps.local.GetOrFail(ctx, echo.InCluster(c))
 							if err := local.CallOrFail(ctx, echo.CallOptions{
@@ -46,4 +47,68 @@ func TestClusterLocalService(t *testing.T) {
 				}
 			})
 		})
+}
+
+// TelemetryTest validates that source and destination labels are collected
+// for multicluster traffic.
+func TestClusterTelemetryLabels(t *testing.T) {
+	framework.NewTest(t).
+		RequiresMinClusters(2).
+		Run(func(ctx framework.TestContext) {
+			ctx.NewSubTest("telemetry").
+				Run(func(ctx framework.TestContext) {
+					for _, src := range apps.podA {
+						src := src
+						ctx.NewSubTest(fmt.Sprintf("from %s", src.Config().Cluster.Name())).
+							Run(func(ctx framework.TestContext) {
+								res := src.CallOrFail(ctx, echo.CallOptions{
+									Target:   apps.podB[0],
+									PortName: "http",
+									Count:    callsPerCluster * len(apps.podB),
+								})
+
+								// check we reached all clusters before checking each cluster's stats
+								if err := res.CheckReachedClusters(apps.podB.Clusters()); err != nil {
+									ctx.Fatal(err)
+								}
+
+								for _, dest := range apps.podB {
+									validateClusterLabelsInStats(t, src, src.Config().Cluster, dest.Config().Cluster)
+									validateClusterLabelsInStats(t, dest, src.Config().Cluster, dest.Config().Cluster)
+								}
+							})
+					}
+				})
+		})
+}
+
+func validateClusterLabelsInStats(t test.Failer, svc echo.Instance, expSrc, expDst resource.Cluster) {
+	t.Helper()
+	workloads := svc.WorkloadsOrFail(t)
+	stats := workloads[0].Sidecar().StatsOrFail(t)
+
+	for _, metricName := range []string{"istio_requests_total", "istio_request_duration_milliseconds"} {
+		instances, found := stats[metricName]
+		if !found {
+			t.Fatalf("%s not found in stats: %v", metricName, stats)
+		}
+
+		for _, metric := range instances.Metric {
+			hasSourceCluster := false
+			hasDestinationCluster := false
+			for _, label := range metric.Label {
+				if label.GetName() == "source_cluster" && label.GetValue() == expSrc.Name() {
+					hasSourceCluster = true
+					continue
+				}
+				if label.GetName() == "destination_cluster" && label.GetValue() == expDst.Name() {
+					hasDestinationCluster = true
+					continue
+				}
+			}
+			if !hasSourceCluster && !hasDestinationCluster {
+				t.Fatalf("cluster labels missing for %q. labels: %v", metricName, metric.Label)
+			}
+		}
+	}
 }

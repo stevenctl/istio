@@ -102,9 +102,11 @@ func TestMain(m *testing.M) {
 	framework.
 		NewSuite(m).
 		Setup(func(ctx resource.Context) (err error) {
-			apps.clusterLocalNS, err = namespace.New(ctx, namespace.Config{Prefix: "cluster-local", Inject: true})
-			if err != nil {
-				return err
+			if len(ctx.Clusters()) > 0 {
+				apps.clusterLocalNS, err = namespace.New(ctx, namespace.Config{Prefix: "cluster-local", Inject: true})
+				if err != nil {
+					return err
+				}
 			}
 			crd, err := ioutil.ReadFile("testdata/service-apis-crd.yaml")
 			if err != nil {
@@ -149,7 +151,12 @@ values:
   pilot:
     env:
       PILOT_ENABLED_SERVICE_APIS: "true"
-  meshConfig: *.%s.svc.cluster.local`, clusterLocalNS)
+  meshConfig:
+    serviceSettings: 
+      - settings:
+          clusterLocal: true
+        hosts:
+          - "*.%s.svc.cluster.local"`, clusterLocalNS)
 		})).
 		Setup(func(ctx resource.Context) error {
 			var err error
