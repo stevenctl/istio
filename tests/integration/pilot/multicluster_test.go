@@ -52,6 +52,7 @@ func TestClusterLocalService(t *testing.T) {
 // TelemetryTest validates that source and destination labels are collected
 // for multicluster traffic.
 func TestClusterTelemetryLabels(t *testing.T) {
+	// TODO(landow) we can remove this when tests/integration/telemetry are converted to cover multicluster
 	framework.NewTest(t).
 		RequiresMinClusters(2).
 		Run(func(ctx framework.TestContext) {
