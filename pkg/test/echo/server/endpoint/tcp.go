@@ -16,6 +16,7 @@ package endpoint
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -98,12 +99,25 @@ func (s *tcpInstance) echo(conn net.Conn) {
 		_ = conn.Close()
 	}()
 
+	log.Infof("TCP Request:\n  Source IP:%s\n  Destination Port:%d", conn.RemoteAddr(), s.Port.Port)
+
 	// If this is server first, client expects a message from server. Send the magic string.
 	if s.Port.ServerFirst {
 		_, _ = conn.Write([]byte(common.ServerFirstMagicString))
 	}
 
-	initialReply := true
+	// Write non-request fields specific to the instance
+	respFields := map[response.Field]string{
+		response.StatusCodeField:     response.StatusCodeOK,
+		response.ClusterField:        s.Cluster,
+		response.ServiceVersionField: s.Version,
+		response.ServicePortField:    string(s.Port.Port),
+	}
+	for field, val := range respFields {
+		_, _ = conn.Write([]byte(fmt.Sprintf("%s=%s\n", string(field), val)))
+	}
+
+	// echo the message from the request
 	for {
 		buf, err := bufio.NewReader(conn).ReadBytes(byte('\n'))
 		if err != nil {
@@ -112,14 +126,6 @@ func (s *tcpInstance) echo(conn net.Conn) {
 			}
 			return
 		}
-		log.Infof("TCP Request:\n  Source IP:%s\n  Destination Port:%d", conn.RemoteAddr(), s.Port.Port)
-		if initialReply {
-			// Fill the field in the response
-			_, _ = conn.Write([]byte(fmt.Sprintf("%s=%s\n", string(response.StatusCodeField), response.StatusCodeOK)))
-			initialReply = false
-		}
-
-		// echo the message in the buffer
 		_, _ = conn.Write(buf)
 	}
 }
