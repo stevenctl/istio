@@ -361,26 +361,20 @@ func protocolSniffingCases(ctx framework.TestContext) []TrafficTestCase {
 					continue
 				}
 
-				// so we can validate all clusters are hit
-				callCount := callsPerCluster * len(destinations)
 				for _, call := range []struct {
 					// The port we call
 					port string
 					// The actual type of traffic we send to the port
 					scheme scheme.Instance
 				}{
-					{"http", scheme.HTTP},
-					{"auto-http", scheme.HTTP},
 					{"tcp", scheme.TCP},
 					{"auto-tcp", scheme.TCP},
-					{"grpc", scheme.GRPC},
-					{"auto-grpc", scheme.GRPC},
 				} {
 					call := call
 					cases = append(cases, TrafficTestCase{
 						name: fmt.Sprintf("%v %v->%v from %s", call.port, client.Config().Service, destination.Config().Service, client.Config().Cluster.Name()),
 						call: func() (echoclient.ParsedResponses, error) {
-							return client.Call(echo.CallOptions{Target: destination, PortName: call.port, Scheme: call.scheme, Count: callCount, Timeout: time.Second * 1})
+							return client.Call(echo.CallOptions{Target: destination, PortName: call.port, Scheme: call.scheme, Count: 250, Timeout: time.Second * 1})
 						},
 						validator: func(responses echoclient.ParsedResponses) error {
 							return responses.CheckOK()
@@ -560,10 +554,10 @@ func TestTraffic(t *testing.T) {
 		Features("traffic.routing", "traffic.reachability", "traffic.shifting").
 		Run(func(ctx framework.TestContext) {
 			cases := map[string][]TrafficTestCase{}
-			cases["virtualservice"] = virtualServiceCases(ctx)
+			virtualServiceCases(ctx)
 			cases["sniffing"] = protocolSniffingCases(ctx)
-			cases["serverfirst"] = serverFirstTestCases()
-			cases["vm"] = vmTestCases(apps.vmA)
+			serverFirstTestCases()
+			vmTestCases(apps.vmA)
 			for n, tts := range cases {
 				ctx.NewSubTest(n).Run(func(ctx framework.TestContext) {
 					for _, tt := range tts {
@@ -611,7 +605,7 @@ func ExecuteTrafficTest(ctx framework.TestContext, tt TrafficTestCase) {
 					return e
 				}
 				return nil
-			}, retry.Delay(time.Millisecond*100), retry.Timeout(time.Second*10), retry.Converge(3))
+			}, retry.Delay(time.Millisecond*100), retry.Timeout(time.Second*60), retry.Converge(20))
 		}
 	})
 }
