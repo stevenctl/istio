@@ -28,20 +28,20 @@ import (
 const callsPerCluster = 5
 
 type TrafficTestCase struct {
-	name   string
-	config string
+	Name   string
+	Config string
 
 	// Multiple calls. Cannot be used with call/validator
-	calls []TrafficCall
+	Calls []TrafficCall
 
 	// Single call
-	call      func() (echoclient.ParsedResponses, error)
-	validator func(echoclient.ParsedResponses) error
+	Call      func() (echoclient.ParsedResponses, error)
+	Validator func(echoclient.ParsedResponses) error
 
 	// if enabled, we will assert the request fails, rather than the request succeeds
-	expectFailure bool
+	ExpectFailure bool
 	// setting cases to skipped is better than not adding them - gives visibility to what needs to be fixed
-	skip bool
+	Skip bool
 }
 
 type TrafficCall struct {
@@ -51,24 +51,24 @@ type TrafficCall struct {
 }
 
 func ExecuteTrafficTest(ctx framework.TestContext, tt TrafficTestCase, namespace string) {
-	ctx.NewSubTest(tt.name).Run(func(ctx framework.TestContext) {
-		if tt.skip {
+	ctx.NewSubTest(tt.Name).Run(func(ctx framework.TestContext) {
+		if tt.Skip {
 			ctx.SkipNow()
 		}
-		if len(tt.config) > 0 {
-			ctx.Config().ApplyYAMLOrFail(ctx, namespace, tt.config)
+		if len(tt.Config) > 0 {
+			ctx.Config().ApplyYAMLOrFail(ctx, namespace, tt.Config)
 			ctx.Cleanup(func() {
-				_ = ctx.Config().DeleteYAML(namespace, tt.config)
+				_ = ctx.Config().DeleteYAML(namespace, tt.Config)
 			})
 		}
-		if tt.call != nil {
-			if tt.calls != nil {
+		if tt.Call != nil {
+			if tt.Calls != nil {
 				ctx.Fatalf("defined calls and calls; may only define on or the other")
 			}
-			tt.calls = []TrafficCall{{tt.call, tt.validator, tt.expectFailure}}
+			tt.Calls = []TrafficCall{{tt.Call, tt.Validator, tt.ExpectFailure}}
 		}
-		for i, c := range tt.calls {
-			name := fmt.Sprintf("%s/%d", tt.name, i)
+		for i, c := range tt.Calls {
+			name := fmt.Sprintf("%s/%d", tt.Name, i)
 			retry.UntilSuccessOrFail(ctx, func() error {
 				r, err := c.call()
 				if !c.expectFailure && err != nil {
@@ -90,7 +90,7 @@ func ExecuteTrafficTest(ctx framework.TestContext, tt TrafficTestCase, namespace
 					return e
 				}
 				return nil
-			}, retry.Delay(time.Millisecond*100), retry.Timeout(time.Second*10), retry.Converge(3))
+			}, retry.Delay(time.Millisecond*100), retry.Timeout(2*time.Minute), retry.Converge(50))
 		}
 	})
 }
