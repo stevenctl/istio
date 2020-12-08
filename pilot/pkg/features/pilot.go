@@ -391,7 +391,7 @@ var (
 	WorkloadEntryAutoRegistration = env.RegisterBoolVar("PILOT_ENABLE_WORKLOAD_ENTRY_AUTOREGISTRATION", false,
 		"Enables auto-registering WorkloadEntries based on associated WorkloadGroups upon XDS connection by the workload.").Get()
 
-	WorkloadEntryCleanupGracePeriod = env.RegisterDurationVar("PILOT_WORKLOAD_ENTRY_GRACE_PERIOD", 10*time.Second,
+	WorkloadEntryCleanupGracePeriod = env.RegisterDurationVar("PILOT_WORKLOAD_ENTRY_GRACE_PERIOD", 30*time.Second,
 		"The amount of time an auto-registered workload can remain disconnected from all Pilot instances before the "+
 			"associated WorkloadEntry is cleaned up.").Get()
 
