@@ -218,6 +218,7 @@ type PushContext struct {
 type Gateway struct {
 	// gateway ip address
 	Addr string
+	Hostname string
 	// gateway port
 	Port uint32
 }
@@ -981,7 +982,7 @@ func (ps *PushContext) updateContext(
 	pushReq *PushRequest) error {
 
 	var servicesChanged, virtualServicesChanged, destinationRulesChanged, gatewayChanged,
-		authnChanged, authzChanged, envoyFiltersChanged, sidecarsChanged bool
+	authnChanged, authzChanged, envoyFiltersChanged, sidecarsChanged bool
 
 	for conf := range pushReq.ConfigsUpdated {
 		switch conf.Kind {

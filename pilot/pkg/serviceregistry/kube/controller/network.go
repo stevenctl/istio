@@ -167,24 +167,30 @@ func (c *Controller) extractGatewaysInner(svc *model.Service) bool {
 		c.networkGateways[svc.Hostname] = map[string][]*model.Gateway{}
 	}
 
-	gws := make([]*model.Gateway, 0, len(svc.Attributes.ClusterExternalAddresses))
+	gws := make([]*model.Gateway, 0, len(svc.Attributes.ClusterExternalAddresses)+len(svc.Attributes.ClusterExternalHostnames))
 
 	// TODO(landow) ClusterExternalAddresses doesn't need to get used outside of the kube controller, and spreads
 	// TODO(cont)   logic between ConvertService, extractGatewaysInner, and updateServiceNodePortAddresses.
 	if svc.Attributes.ClusterExternalAddresses != nil {
 		// check if we have node port mappings
+		mappedPort := gwPort
 		if svc.Attributes.ClusterExternalPorts != nil {
 			if nodePortMap, exists := svc.Attributes.ClusterExternalPorts[c.clusterID]; exists {
 				// what we now have is a service port. If there is a mapping for cluster external ports,
 				// look it up and get the node port for the remote port
-				if nodePort, exists := nodePortMap[gwPort]; exists {
-					gwPort = nodePort
+				if nodePort, exists := nodePortMap[mappedPort]; exists {
+					mappedPort = nodePort
 				}
 			}
 		}
 		ips := svc.Attributes.ClusterExternalAddresses[c.clusterID]
 		for _, ip := range ips {
-			gws = append(gws, &model.Gateway{Addr: ip, Port: gwPort})
+			gws = append(gws, &model.Gateway{Addr: ip, Port: mappedPort})
+		}
+	}
+	if svc.Attributes.ClusterExternalHostnames != nil {
+		for _, hostname := range svc.Attributes.ClusterExternalHostnames[c.clusterID] {
+			gws = append(gws, &model.Gateway{Hostname: hostname, Port: gwPort})
 		}
 	}
 

@@ -133,6 +133,7 @@ func ConvertService(svc coreV1.Service, domainSuffix string, clusterID string) *
 	case coreV1.ServiceTypeLoadBalancer:
 		if len(svc.Status.LoadBalancer.Ingress) > 0 {
 			var lbAddrs []string
+			var hostnames []string
 			for _, ingress := range svc.Status.LoadBalancer.Ingress {
 				if len(ingress.IP) > 0 {
 					lbAddrs = append(lbAddrs, ingress.IP)
@@ -142,10 +143,13 @@ func ConvertService(svc coreV1.Service, domainSuffix string, clusterID string) *
 					// in time may not work. So, when we get just hostnames instead of IPs, we need
 					// to smartly switch from EDS to strict_dns rather than doing the naive thing of
 					// resolving the DNS name and hoping the resolution is one-time task.
-					lbAddrs = append(lbAddrs, ingress.Hostname)
+					hostnames = append(hostnames, ingress.Hostname)
 				}
 			}
 			if len(lbAddrs) > 0 {
+				istioService.Attributes.ClusterExternalAddresses = map[string][]string{clusterID: lbAddrs}
+			}
+			if len(hostnames) > 0 {
 				istioService.Attributes.ClusterExternalAddresses = map[string][]string{clusterID: lbAddrs}
 			}
 		}

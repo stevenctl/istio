@@ -447,6 +447,8 @@ type ServiceAttributes struct {
 	// for clusters where the service resides
 	ClusterExternalAddresses map[string][]string
 
+	ClusterExternalHostnames map[string][]string
+
 	// ClusterExternalPorts is a mapping between a cluster name and the service port
 	// to node port mappings for a given service. When accessing the service via
 	// node port IPs, we need to use the kubernetes assigned node ports of the service

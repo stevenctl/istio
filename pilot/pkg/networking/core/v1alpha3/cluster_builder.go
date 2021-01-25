@@ -205,6 +205,16 @@ func (cb *ClusterBuilder) buildDefaultCluster(name string, discoveryType cluster
 		Name:                 name,
 		ClusterDiscoveryType: &cluster.Cluster_Type{Type: discoveryType},
 	}
+
+	// If an EDS cluster contains endpoints from other networks, and the other networks
+	// use a hostname for their gateway, switch to STRICT_DNS.
+	if discoveryType == cluster.Cluster_EDS {
+		if gwEndpoints := cb.filterDNSNetworkGateways(cb.proxy, localityLbEndpoints); len(gwEndpoints) != 0 {
+			localityLbEndpoints = gwEndpoints
+			discoveryType = cluster.Cluster_STRICT_DNS
+		}
+	}
+
 	switch discoveryType {
 	case cluster.Cluster_STRICT_DNS:
 		c.DnsLookupFamily = cluster.Cluster_V4_ONLY
@@ -249,6 +259,64 @@ func (cb *ClusterBuilder) buildDefaultCluster(name string, discoveryType cluster
 	addTelemetryMetadata(opts, service, direction, allInstances)
 	addNetworkingMetadata(opts, service, direction)
 	return c
+}
+
+func (cb *ClusterBuilder) filterDNSNetworkGateways(proxy *model.Proxy, endpoints []*endpoint.LocalityLbEndpoints) []*endpoint.LocalityLbEndpoints {
+	// TODO possible code-reuse from ep_filters?
+	// TODO as written, this will break load balancing weights
+	var out []*endpoint.LocalityLbEndpoints
+	var hasHostname bool
+	for _, baseEndpoint := range endpoints {
+		mappedEp := &endpoint.LocalityLbEndpoints{
+			Locality: baseEndpoint.Locality,
+			Priority: baseEndpoint.Priority,
+		}
+		for _, lbEndpoint := range baseEndpoint.GetLbEndpoints() {
+			epNetwork := istioMetadata(lbEndpoint, "network")
+			gws := cb.push.NetworkGatewaysByNetwork(epNetwork)
+			if epNetwork == proxy.Metadata.Network && len(gws) == 0 {
+				mappedEp.LbEndpoints = append(mappedEp.LbEndpoints, lbEndpoint)
+			} else {
+				for _, gw := range gws {
+					var addr string
+					if gw.Hostname != "" {
+						hasHostname = true
+						addr = gw.Hostname
+					}
+					if gw.Addr != "" {
+						addr = gw.Addr
+					}
+					epAddr := util.BuildAddress(addr, gw.Port)
+					gwEp := &endpoint.LbEndpoint{
+						HostIdentifier: &endpoint.LbEndpoint_Endpoint{
+							Endpoint: &endpoint.Endpoint{
+								Address: epAddr,
+							},
+						},
+					}
+					// TODO: figure out a way to extract locality data from the gateway public endpoints in meshNetworks
+					gwEp.Metadata = util.BuildLbEndpointMetadata(epNetwork, model.IstioMutualTLSModeLabel, "", "", labels.Instance{})
+					mappedEp.LbEndpoints = append(mappedEp.LbEndpoints, gwEp)
+				}
+			}
+		}
+		out = append(out, mappedEp)
+	}
+	if !hasHostname {
+		return nil
+	}
+	return out
+}
+
+// TODO don't copy this from xds package
+func istioMetadata(ep *endpoint.LbEndpoint, key string) string {
+	if ep.Metadata != nil &&
+		ep.Metadata.FilterMetadata[util.IstioMetadataKey] != nil &&
+		ep.Metadata.FilterMetadata[util.IstioMetadataKey].Fields != nil &&
+		ep.Metadata.FilterMetadata[util.IstioMetadataKey].Fields[key] != nil {
+		return ep.Metadata.FilterMetadata[util.IstioMetadataKey].Fields[key].GetStringValue()
+	}
+	return ""
 }
 
 // buildInboundClusterForPortOrUDS constructs a single inbound listener. The cluster will be bound to
