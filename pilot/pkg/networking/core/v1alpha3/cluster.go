@@ -96,7 +96,9 @@ func (configgen *ConfigGeneratorImpl) BuildClusters(proxy *model.Proxy, push *mo
 		clusters = append(clusters, inboundPatcher.insertedClusters()...)
 	default: // Gateways
 		patcher := clusterPatcher{envoyFilterPatches, networking.EnvoyFilter_GATEWAY}
-		clusters = append(clusters, configgen.buildOutboundClusters(cb, patcher)...)
+		if !(proxy.Type == model.Router && proxy.GetRouterMode() == model.SniDnatRouter) {
+			clusters = append(clusters, configgen.buildOutboundClusters(cb, patcher)...)
+		}
 		// Gateways do not require the default passthrough cluster as they do not have original dst listeners.
 		clusters = patcher.conditionallyAppend(clusters, nil, cb.buildBlackHoleCluster())
 		if proxy.Type == model.Router && proxy.GetRouterMode() == model.SniDnatRouter {
