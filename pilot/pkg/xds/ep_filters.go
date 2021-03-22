@@ -64,9 +64,15 @@ func (b *EndpointBuilder) EndpointsByNetworkFilter(endpoints []*LocLbEndpointsAn
 		// Calculate remote network endpoints
 		for i, lbEp := range ep.llbEndpoints.LbEndpoints {
 			epNetwork := istioMetadata(lbEp, "network")
+			nonMTLS := b.mTLSDisabled(lbEp)
 			// This is a local endpoint or remote network endpoint
 			// but can be accessed directly from local network.
 			if epNetwork == b.network || len(b.push.NetworkGatewaysByNetwork(epNetwork)) == 0 {
+				// AUTO_PASSTHROUGH router should have stricly mTLS endpoints, even for the local network
+				if b.passthroughRouter && b.mTLSDisabled(lbEp) {
+					continue
+				}
+
 				// Copy on write.
 				clonedLbEp := proto.Clone(lbEp).(*endpoint.LbEndpoint)
 				clonedLbEp.LoadBalancingWeight = &wrappers.UInt32Value{
@@ -79,7 +85,7 @@ func (b *EndpointBuilder) EndpointsByNetworkFilter(endpoints []*LocLbEndpointsAn
 				}
 				// cross-network traffic relies on mTLS to be enabled for SNI routing
 				// TODO BTS may allow us to work around this
-				if b.mTLSDisabled(lbEp) {
+				if nonMTLS {
 					continue
 				}
 

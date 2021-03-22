@@ -65,14 +65,16 @@ type EndpointBuilder struct {
 	tunnelType          networking.TunnelType
 
 	// These fields are provided for convenience only
-	subsetName string
-	hostname   host.Name
-	port       int
-	push       *model.PushContext
+	subsetName        string
+	hostname          host.Name
+	port              int
+	push              *model.PushContext
+	passthroughRouter bool
 }
 
 func NewEndpointBuilder(clusterName string, proxy *model.Proxy, push *model.PushContext) EndpointBuilder {
 	_, subsetName, hostname, port := model.ParseSubsetKey(clusterName)
+
 	svc := push.ServiceForHostname(proxy, hostname)
 	return EndpointBuilder{
 		clusterName:         clusterName,
@@ -84,6 +86,7 @@ func NewEndpointBuilder(clusterName string, proxy *model.Proxy, push *model.Push
 		destinationRule:     push.DestinationRule(proxy, svc),
 		peerAuthentications: push.AuthnPolicies.GetPeerAuthenticationsForNamespace(proxy.ConfigNamespace),
 		tunnelType:          GetTunnelBuilderType(clusterName, proxy, push),
+		passthroughRouter:   proxy.Type == model.Router && proxy.GetRouterMode() == model.SniDnatRouter,
 
 		push:       push,
 		subsetName: subsetName,
