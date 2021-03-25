@@ -32,7 +32,10 @@ import (
 	"github.com/golang/protobuf/ptypes/any"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"istio.io/api/label"
 	networking "istio.io/api/networking/v1alpha3"
+	security "istio.io/api/security/v1beta1"
+	"istio.io/api/type/v1beta1"
 	"istio.io/istio/pilot/pkg/config/kube/crd"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/util"
@@ -434,26 +437,78 @@ func logDebug(b *testing.B, m model.Resources) {
 func createEndpoints(numEndpoints int, numServices int) []config.Config {
 	result := make([]config.Config, 0, numServices)
 	for s := 0; s < numServices; s++ {
+		svcName := fmt.Sprintf("foo-%d", s)
 		endpoints := make([]*networking.WorkloadEntry, 0, numEndpoints)
 		for e := 0; e < numEndpoints; e++ {
-			endpoints = append(endpoints, &networking.WorkloadEntry{Address: fmt.Sprintf("111.%d.%d.%d", e/(256*256), (e/256)%256, e%256)})
-		}
-		result = append(result, config.Config{
-			Meta: config.Meta{
-				GroupVersionKind:  collections.IstioNetworkingV1Alpha3Serviceentries.Resource().GroupVersionKind(),
-				Name:              fmt.Sprintf("foo-%d", s),
-				Namespace:         "default",
-				CreationTimestamp: time.Now(),
-			},
-			Spec: &networking.ServiceEntry{
-				Hosts: []string{fmt.Sprintf("foo-%d.com", s)},
-				Ports: []*networking.Port{
-					{Number: 80, Name: "http-port", Protocol: "http"},
+			endpoints = append(endpoints, &networking.WorkloadEntry{
+				Labels: map[string]string{
+					"app":                      svcName,
+					label.SecurityTlsMode.Name: "istio",
 				},
-				Endpoints:  endpoints,
-				Resolution: networking.ServiceEntry_STATIC,
+				Address: fmt.Sprintf("111.%d.%d.%d", e/(256*256), (e/256)%256, e%256),
+			})
+		}
+		result = append(result,
+			config.Config{
+				Meta: config.Meta{
+					GroupVersionKind:  collections.IstioNetworkingV1Alpha3Serviceentries.Resource().GroupVersionKind(),
+					Name:              svcName,
+					Namespace:         "default",
+					CreationTimestamp: time.Now(),
+				},
+				Spec: &networking.ServiceEntry{
+					Hosts: []string{fmt.Sprintf("foo-%d.com", s)},
+					Ports: []*networking.Port{
+						{Number: 80, Name: "http-port", Protocol: "http"},
+					},
+					Endpoints:  endpoints,
+					Resolution: networking.ServiceEntry_STATIC,
+				},
 			},
-		})
+			// attempt to create a PeerAuthentication that triggers the most complex mTLS checks in EDS
+			config.Config{
+				Meta: config.Meta{
+					GroupVersionKind:  collections.IstioSecurityV1Beta1Peerauthentications.Resource().GroupVersionKind(),
+					Name:              svcName,
+					Namespace:         "default",
+					CreationTimestamp: time.Now(),
+				},
+				Spec: &security.PeerAuthentication{
+					Selector: &v1beta1.WorkloadSelector{
+						MatchLabels: map[string]string{"app": svcName},
+					},
+					PortLevelMtls: map[uint32]*security.PeerAuthentication_MutualTLS{
+						80: {Mode: security.PeerAuthentication_MutualTLS_PERMISSIVE},
+					},
+				},
+			},
+			// attempt to create a DestinationRule that triggers the most complex mTLS checks in EDS
+			config.Config{
+				Meta: config.Meta{
+					GroupVersionKind:  collections.IstioNetworkingV1Alpha3Destinationrules.Resource().GroupVersionKind(),
+					Name:              svcName,
+					Namespace:         "default",
+					CreationTimestamp: time.Now(),
+				},
+				Spec: &networking.DestinationRule{
+					TrafficPolicy: &networking.TrafficPolicy{
+						PortLevelSettings: []*networking.TrafficPolicy_PortTrafficPolicy{{
+							Port: &networking.PortSelector{},
+							Tls:  &networking.ClientTLSSettings{Mode: networking.ClientTLSSettings_ISTIO_MUTUAL},
+						}},
+					},
+					Subsets: []*networking.Subset{{
+						Labels: map[string]string{"app": svcName},
+						TrafficPolicy: &networking.TrafficPolicy{
+							PortLevelSettings: []*networking.TrafficPolicy_PortTrafficPolicy{{
+								Port: &networking.PortSelector{},
+								Tls:  &networking.ClientTLSSettings{Mode: networking.ClientTLSSettings_ISTIO_MUTUAL},
+							}},
+						},
+					}},
+				},
+			},
+		)
 	}
 	return result
 }
