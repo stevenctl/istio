@@ -105,7 +105,7 @@ func TestBadRemoteSecret(t *testing.T) {
 		).
 		Run(func(t framework.TestContext) {
 			// we don't need to test this per-cluster
-			primary := t.Clusters().Configs()[0]
+			primary := t.Clusters().Primaries()[0]
 			// it doesn't matter if the other cluster is a primary/remote/etc.
 			remote := t.Clusters().Exclude(primary)[0]
 
@@ -142,6 +142,9 @@ func TestBadRemoteSecret(t *testing.T) {
 				Deployments(ns).List(context.TODO(), metav1.ListOptions{LabelSelector: "app=istiod"})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if len(deps.Items) == 0 {
+				t.Skip("no deployments with label app=istiod")
 			}
 			pods := primary.CoreV1().Pods(ns)
 			podMeta := deps.Items[0].Spec.Template.ObjectMeta
