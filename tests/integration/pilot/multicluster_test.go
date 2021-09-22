@@ -150,6 +150,8 @@ func TestBadRemoteSecret(t *testing.T) {
 			pods := primary.CoreV1().Pods(ns)
 			podMeta := deps.Items[0].Spec.Template.ObjectMeta
 			podMeta.Name = pod
+			// don't route traffic from istiod service here
+			podMeta.Labels = map[string]string{}
 			_, err = pods.Create(context.TODO(), &corev1.Pod{
 				ObjectMeta: podMeta,
 				Spec:       deps.Items[0].Spec.Template.Spec,
