@@ -1,0 +1,97 @@
+
+name: Publish Istio release version
+on:
+  push:
+    branches:
+      - 'release-*'
+jobs:
+  tag-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: '0'
+
+      # Parse the tag name from the commit message for the branch push. Assumes that the
+      # commit message is in the form of "Release Istio <TAG> on <BRANCH>"
+      - name: Parse tag name
+        id: tag_version
+        shell: bash "{0}"
+        run: |
+          TAG=$(git log -1 --pretty=%B | sed -n "s/^Release Istio \(.*\) on .*$/\1/p")
+          echo "##[set-output name=tag_name;]$TAG"
+
+      # Creates a tag for the merged release
+      - name: Create tag
+        if: steps.tag_version.outputs.tag_name != ''
+        uses: anothrNick/github-tag-action@1.26.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CUSTOM_TAG: ${{ steps.tag_version.outputs.tag_name }}
+          RELEASE_BRANCHES: release-*
+
+  create-release-builder:
+    name: Create release-builder PR
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: '0'
+        token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        path: istio
+
+    # Parse the tag name from the commit message for the branch push. Assumes that the
+    # commit message is in the form of "Release Istio <TAG> on <BRANCH>"
+    - name: Parse tag name
+      id: tag_version
+      shell: bash "{0}"
+      run: |
+        pushd istio
+        TAG=$(git log -1 --pretty=%B | sed -n "s/^Release Istio \(.*\) on .*$/\1/p")
+        echo "##[set-output name=tag_name;]$TAG"
+        popd
+
+    # Do not do the remaining steps if the tag was not parsed successfully
+    - name: Exit early if tag was not parsed
+      if: steps.tag_version.outputs.tag_name == ''
+      shell: bash
+      run: exit 1
+
+    # Extracts the release branch name. The same branch will be checked out in release-builder
+    - name: Extract branch name
+      id: extract_branch
+      shell: bash
+      run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+
+    - name: Checkout release-builder repo
+      uses: actions/checkout@v2
+      with:
+        repository: solo-io/release-builder
+        path: release-builder
+        ref: ${{ steps.extract_branch.outputs.branch }}
+        token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        fetch-depth: '0'
+
+    # Change into the release-builder repo and apply our release patches.
+    # See https://github.com/solo-io/release-builder/blob/solo-workflows/.solo-io/release-istio.sh
+    - name: Generate PR diff
+      env:
+        ISTIO_BRANCH: ${{ steps.extract_branch.outputs.branch }}
+        RELEASE_NAME:  ${{ steps.tag_version.outputs.tag_name }}
+      run: |
+        cd release-builder
+        git checkout origin/solo-workflows .solo-io/
+        bash .solo-io/release-istio.sh
+        rm -R .solo-io/
+
+    # Creates a PR in the release-builder repo will the release patch applied.
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v3
+      with:
+        path: release-builder
+        token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        title: "Release Istio ${{ steps.tag_version.outputs.tag_name }} on ${{ steps.extract_branch.outputs.branch }}"
+        commit-message: "Release Istio ${{ steps.tag_version.outputs.tag_name }} on ${{ steps.extract_branch.outputs.branch }}"
+        branch: solo-release/istio-${{ steps.tag_version.outputs.tag_name }}
+        delete-branch: true
+        body: Istio ${{ github.event.inputs.tag }} ${{ github.event.inputs.type }} release created by github action.
