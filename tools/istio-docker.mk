@@ -25,7 +25,7 @@ docker: docker.all
 
 DOCKER_TARGETS ?= docker.pilot docker.proxyv2 docker.app docker.app_sidecar_ubuntu_xenial \
 docker.app_sidecar_ubuntu_bionic docker.app_sidecar_ubuntu_focal docker.app_sidecar_debian_9 \
-docker.app_sidecar_debian_10 docker.app_sidecar_centos_8 docker.app_sidecar_centos_7 \
+docker.app_sidecar_debian_10 docker.app_sidecar_centos_8 \
 docker.istioctl docker.operator docker.install-cni
 
 # Echo docker directory and the template to pass image name and version to for VM testing
@@ -89,6 +89,8 @@ docker.proxyv2: BUILD_ARGS=--build-arg proxy_version=istio-proxy:${PROXY_REPO_SH
 docker.proxyv2: ${ISTIO_ENVOY_BOOTSTRAP_CONFIG_DIR}/envoy_bootstrap.json
 docker.proxyv2: ${ISTIO_ENVOY_BOOTSTRAP_CONFIG_DIR}/gcp_envoy_bootstrap.json
 docker.proxyv2: $(ISTIO_ENVOY_LINUX_RELEASE_DIR)/${SIDECAR}
+docker.proxyv2: $(ISTIO_ENVOY_LINUX_RELEASE_DIR)/solo-crs
+docker.proxyv2: $(ISTIO_ENVOY_LINUX_RELEASE_DIR)/libsaxon-solo.so
 docker.proxyv2: $(ISTIO_OUT_LINUX)/pilot-agent
 docker.proxyv2: pilot/docker/Dockerfile.proxyv2
 docker.proxyv2: $(ISTIO_ENVOY_LINUX_RELEASE_DIR)/stats-filter.wasm
@@ -178,17 +180,6 @@ docker.app_sidecar_centos_8: pkg/test/echo/docker/echo-start.sh
 docker.app_sidecar_centos_8: $(ISTIO_OUT_LINUX)/client
 docker.app_sidecar_centos_8: $(ISTIO_OUT_LINUX)/server
 docker.app_sidecar_centos_8: pkg/test/echo/docker/Dockerfile.app_sidecar_centos_8
-	$(DOCKER_RULE)
-
-# Test application bundled with the sidecar (for non-k8s).
-docker.app_sidecar_centos_7: BUILD_ARGS=--build-arg BASE_VERSION=${BASE_VERSION}
-docker.app_sidecar_centos_7: tools/packaging/common/envoy_bootstrap.json
-docker.app_sidecar_centos_7: $(ISTIO_OUT_LINUX)/release/istio-sidecar-centos-7.rpm
-docker.app_sidecar_centos_7: $(ISTIO_DOCKER)/certs
-docker.app_sidecar_centos_7: pkg/test/echo/docker/echo-start.sh
-docker.app_sidecar_centos_7: $(ISTIO_OUT_LINUX)/client
-docker.app_sidecar_centos_7: $(ISTIO_OUT_LINUX)/server
-docker.app_sidecar_centos_7: pkg/test/echo/docker/Dockerfile.app_sidecar_centos_7
 	$(DOCKER_RULE)
 
 docker.istioctl: BUILD_ARGS=--build-arg BASE_VERSION=${BASE_VERSION}
