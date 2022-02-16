@@ -107,7 +107,7 @@ function build_images() {
   nonDistrolessTargets="docker.app docker.app_sidecar_ubuntu_bionic "
   if [[ "${SELECT_TEST}" == "test.integration.pilot.kube" ]]; then
     nonDistrolessTargets+="docker.app_sidecar_ubuntu_xenial docker.app_sidecar_ubuntu_focal docker.app_sidecar_ubuntu_bionic "
-    nonDistrolessTargets+="docker.app_sidecar_debian_9 docker.app_sidecar_debian_10 docker.app_sidecar_centos_7 docker.app_sidecar_centos_8 "
+    nonDistrolessTargets+="docker.app_sidecar_debian_9 docker.app_sidecar_debian_10 docker.app_sidecar_centos_8 "
   fi
   targets+="docker.operator "
   targets+="docker.install-cni "
