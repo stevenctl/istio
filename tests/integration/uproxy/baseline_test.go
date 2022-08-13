@@ -701,8 +701,10 @@ func RunReachability(testCases []reachability.TestCase, t framework.TestContext)
 	runTest := func(t framework.TestContext, f func(t framework.TestContext, src echo.Instance, dst echo.Instance, opt echo.CallOptions)) {
 		svcs := apps.All
 		for _, src := range svcs {
+			src := src
 			t.NewSubTestf("from %v", src.Config().Service).RunParallel(func(t framework.TestContext) {
 				for _, dst := range svcs {
+					dst := dst
 					t.NewSubTestf("to %v", dst.Config().Service).RunParallel(func(t framework.TestContext) {
 						for _, opt := range callOptions {
 							src, dst, opt := src, dst, opt
