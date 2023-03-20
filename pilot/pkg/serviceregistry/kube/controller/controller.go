@@ -16,6 +16,7 @@ package controller
 
 import (
 	"fmt"
+	"istio.io/istio/pkg/spiffe"
 	"net"
 	"sort"
 	"sync"
@@ -1227,6 +1228,10 @@ func (c *Controller) WorkloadInstanceHandler(si *model.WorkloadInstance, event m
 	}
 
 	// handle WorkloadInstance in ambient by creating a mock pod that models the VM workload.
+	serviceAccountName := si.Endpoint.ServiceAccount
+	if id, err := spiffe.ParseIdentity(si.Endpoint.ServiceAccount); err == nil {
+		serviceAccountName = id.ServiceAccount
+	}
 	ambientMockPod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      si.Name,
@@ -1234,7 +1239,7 @@ func (c *Controller) WorkloadInstanceHandler(si *model.WorkloadInstance, event m
 			Labels:    si.Endpoint.Labels,
 		},
 		Spec: v1.PodSpec{
-			ServiceAccountName: si.Endpoint.ServiceAccount,
+			ServiceAccountName: serviceAccountName,
 			NodeName:           si.Endpoint.NodeName,
 			Containers: []v1.Container{
 				{
@@ -1244,10 +1249,13 @@ func (c *Controller) WorkloadInstanceHandler(si *model.WorkloadInstance, event m
 		},
 		Status: v1.PodStatus{
 			PodIP: si.Endpoint.Address,
-			Conditions: []v1.PodCondition{{
-				Type:   v1.PodReady,
-				Status: v1.ConditionTrue,
-			}},
+			Phase: v1.PodRunning,
+			Conditions: []v1.PodCondition{
+				{
+					Type:   v1.PodReady,
+					Status: v1.ConditionTrue,
+				},
+			},
 		},
 	}
 	// treat workloads on ambient as HBONE native
