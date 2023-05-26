@@ -17,6 +17,7 @@ package serviceentry
 import (
 	"fmt"
 	"hash/fnv"
+	"istio.io/api/label"
 	"strconv"
 	"sync"
 	"time"
@@ -836,7 +837,20 @@ func (s *Controller) GetProxyWorkloadLabels(proxy *model.Proxy) labels.Instance 
 }
 
 func (s *Controller) NetworkGateways() []model.NetworkGateway {
-	// TODO implement mesh networks loading logic from kube controller if needed
+	// TODO support registry service name in meshNetworks?
+	var gws []model.NetworkGateway
+	for _, service := range s.services.getAllServices() {
+		if nw := service.Attributes.Labels[label.TopologyNetwork.Name]; nw != "" {
+			for _, addr := range service.Attributes.ClusterExternalAddresses.GetAddressesFor(s.clusterID) {
+				gws = append(gws, model.NetworkGateway{
+					Network: network.ID(nw),
+					Cluster: s.clusterID,
+					Addr:    addr,
+					Port:    15443,
+				})
+			}
+		}
+	}
 	return nil
 }
 

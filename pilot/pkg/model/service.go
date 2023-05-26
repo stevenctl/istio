@@ -1105,6 +1105,50 @@ func (s *Service) getAllAddresses() []string {
 	return addresses
 }
 
+// NetworkGateways gives NetworkGateways defined by labels on the Service
+func (s *Service) NetworkGateways(clusterID cluster.ID) NetworkGatewaySet {
+	gatewayPort := DefaultNetworkGatewayPort
+	nw := s.Attributes.Labels[label.TopologyNetwork.Name]
+	if nw == "" {
+		return nil
+	}
+	if gwPortStr := s.Attributes.Labels[label.NetworkingGatewayPort.Name]; gwPortStr != "" {
+		if gwPort, err := strconv.ParseUint(gwPortStr, 10, 16); err == nil {
+			gatewayPort = uint32(gwPort)
+		}
+		log.Warnf("could not parse %q for %s on %s/%s; defaulting to %d",
+			gwPortStr, label.NetworkingGatewayPort.Name, s.Attributes.Namespace, s.Attributes.Name, DefaultNetworkGatewayPort)
+	}
+	return s.NetworkGatewaysWithAddresses(NetworkGateway{
+		Cluster: clusterID,
+		Network: network.ID(nw),
+		Port:    gatewayPort,
+	})
+}
+
+// NetworkGatewaysWithAddresses fills the given NetworkGateway with each of the services external addresses
+func (s *Service) NetworkGatewaysWithAddresses(gw NetworkGateway) NetworkGatewaySet {
+	// what we now have is a service port. If there is a mapping for cluster external ports,
+	// look it up and get the node port for the remote port
+	if s.Attributes.ClusterExternalPorts != nil {
+		if npm, exists := s.Attributes.ClusterExternalPorts[gw.Cluster]; exists {
+			if nodePort, exists := npm[gw.Port]; exists {
+				gw.Port = nodePort
+			}
+		}
+	}
+
+	// expand addresses into gateways
+	externalAddresses := s.Attributes.ClusterExternalAddresses.GetAddressesFor(gw.Cluster)
+	out := make(NetworkGatewaySet, len(externalAddresses))
+	for _, addr := range externalAddresses {
+		gw.Addr = addr
+		out.Add(gw)
+	}
+
+	return nil
+}
+
 // GetTLSModeFromEndpointLabels returns the value of the label
 // security.istio.io/tlsMode if set. Do not return Enums or constants
 // from this function as users could provide values other than istio/disabled

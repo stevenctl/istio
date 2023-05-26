@@ -35,6 +35,8 @@ import (
 	"istio.io/istio/pkg/util/sets"
 )
 
+const DefaultNetworkGatewayPort uint32 = 15443
+
 // NetworkGateway is the gateway of a network
 type NetworkGateway struct {
 	// Network is the ID of the network where this Gateway resides.

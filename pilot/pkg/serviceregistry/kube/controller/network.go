@@ -16,7 +16,6 @@ package controller
 
 import (
 	"net"
-	"strconv"
 	"sync"
 
 	"github.com/yl2chen/cidranger"
@@ -248,33 +247,12 @@ func (n *networkManager) extractGatewaysInner(svc *model.Service) bool {
 	n.Lock()
 	defer n.Unlock()
 	previousGateways := n.networkGatewaysBySvc[svc.Hostname]
-	gateways := n.getGatewayDetails(svc)
-	// short circuit for most services.
-	if len(previousGateways) == 0 && len(gateways) == 0 {
-		return false
-	}
 
-	newGateways := make(model.NetworkGatewaySet)
-	// check if we have node port mappings
-	nodePortMap := make(map[uint32]uint32)
-	if svc.Attributes.ClusterExternalPorts != nil {
-		if npm, exists := svc.Attributes.ClusterExternalPorts[n.clusterID]; exists {
-			nodePortMap = npm
-		}
-	}
-
-	for _, addr := range svc.Attributes.ClusterExternalAddresses.GetAddressesFor(n.clusterID) {
-		for _, gw := range gateways {
-			// what we now have is a service port. If there is a mapping for cluster external ports,
-			// look it up and get the node port for the remote port
-			if nodePort, exists := nodePortMap[gw.Port]; exists {
-				gw.Port = nodePort
-			}
-
-			gw.Cluster = n.clusterID
-			gw.Addr = addr
-			newGateways.Add(gw)
-		}
+	// label based gateways
+	newGateways := svc.NetworkGateways(n.clusterID)
+	// meshNetworks registryServiceName+fromRegistry (this loop should rarely hit)
+	for _, meshNetworksGateway := range n.registryServiceNameGateways[svc.Hostname] {
+		newGateways.AddAll(svc.NetworkGatewaysWithAddresses(meshNetworksGateway))
 	}
 
 	gatewaysChanged := !newGateways.Equals(previousGateways)
@@ -285,32 +263,6 @@ func (n *networkManager) extractGatewaysInner(svc *model.Service) bool {
 	}
 
 	return gatewaysChanged
-}
-
-// getGatewayDetails returns gateways without the address populated, only the network and (unmapped) port for a given service.
-func (n *networkManager) getGatewayDetails(svc *model.Service) []model.NetworkGateway {
-	// TODO should we start checking if svc's Ports contain the gateway port?
-
-	// label based gateways
-	// TODO label based gateways could support being the gateway for multiple networks
-	if nw := svc.Attributes.Labels[label.TopologyNetwork.Name]; nw != "" {
-		if gwPortStr := svc.Attributes.Labels[label.NetworkingGatewayPort.Name]; gwPortStr != "" {
-			if gwPort, err := strconv.Atoi(gwPortStr); err == nil {
-				return []model.NetworkGateway{{Port: uint32(gwPort), Network: network.ID(nw)}}
-			}
-			log.Warnf("could not parse %q for %s on %s/%s; defaulting to %d",
-				gwPortStr, label.NetworkingGatewayPort.Name, svc.Attributes.Namespace, svc.Attributes.Name, DefaultNetworkGatewayPort)
-		}
-		return []model.NetworkGateway{{Port: DefaultNetworkGatewayPort, Network: network.ID(nw)}}
-	}
-
-	// meshNetworks registryServiceName+fromRegistry
-	if gws, ok := n.registryServiceNameGateways[svc.Hostname]; ok {
-		out := append(make([]model.NetworkGateway, 0, len(gws)), gws...)
-		return out
-	}
-
-	return nil
 }
 
 // updateServiceNodePortAddresses updates ClusterExternalAddresses for Services of nodePort type
