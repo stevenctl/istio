@@ -17,6 +17,8 @@ package autoregistration
 import (
 	"fmt"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +48,43 @@ func init() {
 	features.WorkloadEntryAutoRegistration = true
 	features.WorkloadEntryHealthChecks = true
 	features.WorkloadEntryCleanupGracePeriod = 200 * time.Millisecond
+}
+
+var _ Connection = &fakeConn{}
+
+type fakeConn struct {
+	sync.RWMutex
+	proxy    *model.Proxy
+	connTime time.Time
+	stopped  bool
+}
+
+func makeConn(proxy *model.Proxy, connTime time.Time) *fakeConn {
+	return &fakeConn{proxy: proxy, connTime: connTime}
+}
+
+func (f *fakeConn) ID() string {
+	return fmt.Sprintf("%s-%v", f.proxy.IPAddresses[0], f.connTime)
+}
+
+func (f *fakeConn) Proxy() *model.Proxy {
+	return f.proxy
+}
+
+func (f *fakeConn) ConnectedAt() time.Time {
+	return f.connTime
+}
+
+func (f *fakeConn) Stop() {
+	f.Lock()
+	defer f.Unlock()
+	f.stopped = true
+}
+
+func (f *fakeConn) Stopped() bool {
+	f.RLock()
+	defer f.RUnlock()
+	return f.stopped
 }
 
 var (
@@ -91,7 +130,7 @@ func TestNonAutoregisteredWorkloads(t *testing.T) {
 	for name, tc := range cases {
 		tc := tc
 		t.Run(name, func(t *testing.T) {
-			c.RegisterWorkload(tc, time.Now())
+			c.OnConnect(makeConn(tc, time.Now()))
 			items, err := store.List(gvk.WorkloadEntry, model.NamespaceAll)
 			if err != nil {
 				t.Fatalf("failed listing WorkloadEntry: %v", err)
@@ -118,77 +157,82 @@ func TestAutoregistrationLifecycle(t *testing.T) {
 	defer close(stop2)
 	go c1.Run(stop1)
 	go c2.Run(stop2)
+	go store.Run(stop2)
 
 	n := fakeNode("reg1", "zone1", "subzone1")
 
+	var p1conn1, p1conn2 *fakeConn
 	p := fakeProxy("1.2.3.4", wgA, "nw1")
 	p.XdsNode = n
 
+	var p2conn1 *fakeConn
 	p2 := fakeProxy("1.2.3.4", wgA, "nw2")
 	p2.XdsNode = n
 
+	var p3conn1 *fakeConn
 	p3 := fakeProxy("1.2.3.5", wgA, "nw1")
 	p3.XdsNode = n
 
-	// allows associating a Register call with Unregister
-	var origConnTime time.Time
-
 	t.Run("initial registration", func(t *testing.T) {
 		// simply make sure the entry exists after connecting
-		c1.RegisterWorkload(p, time.Now())
+		p1conn1 = makeConn(p, time.Now())
+		c1.OnConnect(p1conn1)
 		checkEntryOrFail(t, store, wgA, p, n, c1.instanceID)
 	})
 	t.Run("multinetwork same ip", func(t *testing.T) {
 		// make sure we don't overrwrite a similar entry for a different network
-		c2.RegisterWorkload(p2, time.Now())
+		p2conn1 = makeConn(p2, time.Now())
+		c2.OnConnect(p2conn1)
 		checkEntryOrFail(t, store, wgA, p, n, c1.instanceID)
 		checkEntryOrFail(t, store, wgA, p2, n, c2.instanceID)
+		c2.OnDisconnect(p2conn1) // cleanup for future tests
 	})
 	t.Run("fast reconnect", func(t *testing.T) {
 		t.Run("same instance", func(t *testing.T) {
 			// disconnect, make sure entry is still there with disconnect meta
-			c1.QueueUnregisterWorkload(p, time.Now())
+			c1.OnDisconnect(p1conn1)
 			time.Sleep(features.WorkloadEntryCleanupGracePeriod / 2)
 			checkEntryOrFail(t, store, wgA, p, n, "")
 			// reconnect, ensure entry is there with the same instance id
-			origConnTime = time.Now()
-			c1.RegisterWorkload(p, origConnTime)
+			p1conn1 = makeConn(p, time.Now())
+			c1.OnConnect(p1conn1)
 			checkEntryOrFail(t, store, wgA, p, n, c1.instanceID)
 		})
 		t.Run("same instance: connect before disconnect ", func(t *testing.T) {
 			// reconnect, ensure entry is there with the same instance id
-			c1.RegisterWorkload(p, origConnTime.Add(10*time.Millisecond))
+			p1conn2 = makeConn(p, p1conn1.ConnectedAt().Add(10*time.Millisecond))
+			c1.OnConnect(p1conn2)
 			// disconnect (associated with original connect, not the reconnect)
 			// make sure entry is still there with disconnect meta
-			c1.QueueUnregisterWorkload(p, origConnTime)
+			c1.OnDisconnect(p1conn1)
 			time.Sleep(features.WorkloadEntryCleanupGracePeriod / 2)
 			checkEntryOrFail(t, store, wgA, p, n, c1.instanceID)
 		})
 		t.Run("different instance", func(t *testing.T) {
 			// disconnect, make sure entry is still there with disconnect metadata
-			c1.QueueUnregisterWorkload(p, time.Now())
+			c1.OnDisconnect(p1conn2)
 			time.Sleep(features.WorkloadEntryCleanupGracePeriod / 2)
 			checkEntryOrFail(t, store, wgA, p, n, "")
 			// reconnect, ensure entry is there with the new instance id
-			origConnTime = time.Now()
-			c2.RegisterWorkload(p, origConnTime)
+			p1conn1 = makeConn(p, time.Now())
+			c2.OnConnect(p1conn1)
 			checkEntryOrFail(t, store, wgA, p, n, c2.instanceID)
 		})
 	})
 	t.Run("slow reconnect", func(t *testing.T) {
 		// disconnect, wait and make sure entry is gone
-		c2.QueueUnregisterWorkload(p, origConnTime)
+		c2.OnDisconnect(p1conn1)
 		retry.UntilSuccessOrFail(t, func() error {
 			return checkNoEntry(store, wgA, p)
 		})
 		// reconnect
-		origConnTime = time.Now()
-		c1.RegisterWorkload(p, origConnTime)
+		p1conn1 = makeConn(p, time.Now())
+		c1.OnConnect(p1conn1)
 		checkEntryOrFail(t, store, wgA, p, n, c1.instanceID)
 	})
 	t.Run("garbage collected if pilot stops after disconnect", func(t *testing.T) {
 		// disconnect, kill the cleanup queue from the first controller
-		c1.QueueUnregisterWorkload(p, origConnTime)
+		c1.OnDisconnect(p1conn1)
 		// stop processing the delayed close queue in c1, forces using periodic cleanup
 		close(stop1)
 		stopped1 = true
@@ -200,16 +244,36 @@ func TestAutoregistrationLifecycle(t *testing.T) {
 
 	t.Run("garbage collected if pilot and workload stops simultaneously before pilot can do anything", func(t *testing.T) {
 		// simulate p3 has been registered long before
-		c2.RegisterWorkload(p3, time.Now().Add(-2*maxConnAge))
+		p3conn1 = makeConn(p3, time.Now().Add(-2*maxConnAge))
+		c2.OnConnect(p3conn1)
 
-		// keep silent to simulate the scenario
+		// keep silent to simulate the scenario (don't OnDisconnect to simulate pilot being down)
 
 		// unfortunately, this retry at worst could be twice as long as the sweep interval
 		retry.UntilSuccessOrFail(t, func() error {
 			return checkNoEntry(store, wgA, p3)
 		}, retry.Timeout(time.Until(time.Now().Add(21*features.WorkloadEntryCleanupGracePeriod))))
-	})
 
+		c2.OnDisconnect(p3conn1) // cleanup the state for future tests
+	})
+	t.Run("workload group recreate", func(t *testing.T) {
+		p1conn1 = makeConn(p, time.Now())
+		c2.OnConnect(p1conn1)
+		checkEntryOrFail(t, store, wgA, p, n, c2.instanceID)
+
+		name := strings.Join([]string{wgA.Name, p.IPAddresses[0], string(p.Metadata.Network)}, "-")
+		if err := store.Delete(gvk.WorkloadGroup, wgA.Name, wgA.Namespace, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Delete(gvk.WorkloadEntry, name, wgA.Namespace, nil); err != nil {
+			t.Fatal(err)
+		}
+		createOrFail(t, store, wgA)
+
+		retry.UntilSuccessOrFail(t, func() error {
+			return checkEntry(store, wgA, p, n, c2.instanceID)
+		})
+	})
 	// TODO test garbage collection if pilot stops before disconnect meta is set (relies on heartbeat)
 }
 
@@ -220,7 +284,7 @@ func TestUpdateHealthCondition(t *testing.T) {
 	go ig2.Run(stop)
 	p := fakeProxy("1.2.3.4", wgA, "litNw")
 	p.XdsNode = fakeNode("reg1", "zone1", "subzone1")
-	ig.RegisterWorkload(p, time.Now())
+	ig.OnConnect(makeConn(p, time.Now()))
 	t.Run("auto registered healthy health", func(t *testing.T) {
 		ig.QueueWorkloadEntryHealth(p, HealthEvent{
 			Healthy: true,
