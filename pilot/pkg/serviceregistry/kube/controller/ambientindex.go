@@ -76,6 +76,10 @@ type AmbientIndexImpl struct {
 	serviceByNamespacedHostname map[string]*model.ServiceInfo
 	// TODO(nmittler): Add serviceByHostname to support on-demand for DNS.
 
+	// networkGatewaysByAddressed are indexed by gateway IP
+	// TODO this should include gateways from other k8s service registries and from meshNetworks
+	networkGatewaysByAddress map[networkAddress]*model.AddressInfo
+
 	// Map of Scope -> address
 	waypoints map[model.WaypointScope]*workloadapi.GatewayAddress
 
@@ -131,6 +135,10 @@ func (a *AmbientIndexImpl) Lookup(key string) []*model.AddressInfo {
 	}
 	res := make([]*model.AddressInfo, 0)
 	if _, err := netip.ParseAddr(ip); err != nil {
+		// Could be a network gateway even with non-IP
+		if w, f := a.networkGatewaysByAddress[networkAddress{network, ip}]; f {
+			return []*model.AddressInfo{w}
+		}
 		// this must be namespace/hostname format
 		// lookup Service and any Workloads for that Service for each of the network addresses
 		if svc, f := a.serviceByNamespacedHostname[key]; f {
@@ -151,6 +159,10 @@ func (a *AmbientIndexImpl) Lookup(key string) []*model.AddressInfo {
 	// Next, look at WorkloadEntries
 	if w, f := a.byWorkloadEntry[networkAddr]; f {
 		return []*model.AddressInfo{workloadToAddressInfo(w.Workload)}
+	}
+	// Then, NetworkGateways
+	if w, f := a.networkGatewaysByAddress[networkAddress{network, ip}]; f {
+		return []*model.AddressInfo{w}
 	}
 	// Fallback to service. Note: these IP ranges should be non-overlapping
 	// When a Service lookup is performed, but it and its workloads are returned
@@ -217,6 +229,10 @@ func (a *AmbientIndexImpl) All() []*model.AddressInfo {
 
 	for _, s := range a.serviceByNamespacedHostname {
 		res = append(res, serviceToAddressInfo(s.Service))
+	}
+
+	for _, gw := range a.networkGatewaysByAddress {
+		res = append(res, gw)
 	}
 	return res
 }
@@ -381,6 +397,15 @@ func (c *Controller) setupIndex() *AmbientIndexImpl {
 		serviceByAddr:               map[networkAddress]*model.ServiceInfo{},
 		serviceByNamespacedHostname: map[string]*model.ServiceInfo{},
 	}
+
+	c.AppendNetworkGatewayHandler(func() {
+		if updates := idx.handleNetworkGateways(c.NetworkGateways()); len(updates) > 0 {
+			c.opts.XDSUpdater.ConfigUpdate(&model.PushRequest{
+				ConfigsUpdated: updates,
+				Reason:         model.NewReasonStats(model.AmbientUpdate),
+			})
+		}
+	})
 
 	podHandler := cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
@@ -615,6 +640,83 @@ func toInternalNetworkAddresses(nwAddrs []*workloadapi.NetworkAddress) []network
 		}
 	}
 	return networkAddrs
+}
+
+func (a *AmbientIndexImpl) handleNetworkGateways(gws []model.NetworkGateway) sets.Set[model.ConfigKey] {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	updates := sets.New[model.ConfigKey]()
+	newGateways := make(map[networkAddress]*model.AddressInfo, len(gws))
+
+	for _, gw := range gws {
+		if gw.HBONEPort <= 0 {
+			continue
+		}
+		k := networkAddress{string(gw.Network), gw.Addr}
+		addrInfo := gatewayToAddressInfo(gw)
+		if addrInfo == nil {
+			continue
+		}
+		newGateways[k] = addrInfo
+		oldAddrInfo, f := a.networkGatewaysByAddress[k]
+
+		// added or updated
+		if !f || !proto.Equal(addrInfo, oldAddrInfo) {
+			updates.Insert(model.ConfigKey{Kind: kind.Address, Name: addrInfo.ResourceName()})
+		}
+	}
+
+	// emit updates for removed items
+	oldKeys := sets.New(maps.Keys(a.networkGatewaysByAddress)...)
+	newKeys := sets.New(maps.Keys(newGateways)...)
+	for removed := range oldKeys.Difference(newKeys) {
+		old := a.networkGatewaysByAddress[removed]
+		updates.Insert(model.ConfigKey{Kind: kind.Address, Name: old.ResourceName()})
+	}
+
+	// TODO index by UID when available
+	a.networkGatewaysByAddress = newGateways
+	return updates
+}
+
+func gatewayToAddressInfo(gw model.NetworkGateway) *model.AddressInfo {
+	if ip, err := netip.ParseAddr(gw.Addr); err == nil {
+		uid := string(gw.Cluster) + "//" + "NetworkGateway/" + string(gw.Network) + "/" + gw.Addr
+		td := ""
+		if tdOverride := spiffe.GetTrustDomain(); tdOverride != "cluster.local" {
+			td = tdOverride
+		}
+		// TODO what if we can't parse it? For now it's always an SA.
+		id, _ := spiffe.ParseIdentity(gw.SubjectAltName)
+		return &model.AddressInfo{
+			Address: &workloadapi.Address{
+				Type: &workloadapi.Address_Workload{
+					Workload: &workloadapi.Workload{
+						Uid:            uid,
+						Addresses:      [][]byte{ip.AsSlice()},
+						Network:        string(gw.Network),
+						TunnelProtocol: workloadapi.TunnelProtocol_HBONE,
+						TrustDomain:    td,
+						Namespace:      id.Namespace,
+						ServiceAccount: id.ServiceAccount,
+						ClusterId:      string(gw.Cluster),
+					},
+				},
+			}}
+	}
+
+	// hostname based gateway
+	return &model.AddressInfo{
+		Address: &workloadapi.Address{
+			Type: &workloadapi.Address_Service{Service: &workloadapi.Service{
+				Hostname:        gw.Addr,
+				Addresses:       nil,
+				Ports:           nil,
+				SubjectAltNames: []string{gw.SubjectAltName},
+			}},
+		},
+	}
 }
 
 // NOTE: Mutex is locked prior to being called.

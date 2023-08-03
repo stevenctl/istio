@@ -115,7 +115,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "default",
 					Namespace:   "default",
-					Annotations: map[string]string{gatewaySAOverride: "custom-sa"},
+					Annotations: map[string]string{constants.GatewaySAOverride: "custom-sa"},
 				},
 				Spec: v1alpha2.GatewaySpec{
 					GatewayClassName: defaultClassName,

@@ -165,7 +165,8 @@ const (
 	RemoteGatewayClassName   = "istio-remote"
 	WaypointGatewayClassName = "istio-waypoint"
 	// TODO formalize this API
-	GatewayNameLabel = "istio.io/gateway-name"
+	GatewayNameLabel  = "istio.io/gateway-name"
+	GatewaySAOverride = "gateway.istio.io/service-account"
 
 	// TODO formalize this API
 	// TODO additional values to represent passthrough and hbone or both

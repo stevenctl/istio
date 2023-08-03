@@ -309,7 +309,7 @@ func (d *DeploymentController) configureIstioGateway(log *istiolog.Scope, gw gat
 	input := TemplateInput{
 		Gateway:        &gw,
 		DeploymentName: model.GetOrDefault(gw.Annotations[gatewayNameOverride], defaultName),
-		ServiceAccount: model.GetOrDefault(gw.Annotations[gatewaySAOverride], defaultName),
+		ServiceAccount: model.GetOrDefault(gw.Annotations[constants.GatewaySAOverride], defaultName),
 		Ports:          extractServicePorts(gw),
 		ClusterID:      d.clusterID.String(),
 		KubeVersion122: kube.IsAtLeastVersion(d.client, 22),

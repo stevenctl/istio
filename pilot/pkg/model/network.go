@@ -44,6 +44,12 @@ type NetworkGateway struct {
 	Addr string
 	// gateway port
 	Port uint32
+	// HBONEPort if non-zero indicates that the gateway supports HBONE
+	HBONEPort uint32
+	// SubjectAltName to validate in the outer-HBONE when sending to this double-HBONE gateway.
+	// TODO currently only implemented for k8s Gateway API
+	// TODO support multiple
+	SubjectAltName string
 }
 
 type NetworkGatewaysWatcher interface {

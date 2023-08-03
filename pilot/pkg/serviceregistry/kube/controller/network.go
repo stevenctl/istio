@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"istio.io/istio/pkg/spiffe"
 	"net"
 	"strconv"
 	"sync"
@@ -387,8 +388,9 @@ func (n *networkManager) handleGatewayResource(_ controllers.Object, obj control
 	}
 
 	base := model.NetworkGateway{
-		Network: network.ID(gw.GetLabels()[label.TopologyNetwork.Name]),
-		Cluster: n.clusterID,
+		Network:        network.ID(gw.GetLabels()[label.TopologyNetwork.Name]),
+		Cluster:        n.clusterID,
+		SubjectAltName: spiffe.MustGenSpiffeURI(gw.Namespace, kube.GatewaySA(gw)),
 	}
 	newGateways := model.NetworkGatewaySet{}
 	for _, addr := range gw.Spec.Addresses {

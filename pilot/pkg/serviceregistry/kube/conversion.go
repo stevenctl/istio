@@ -261,3 +261,8 @@ func hasListenerMode(l v1beta1.Listener, mode string) bool {
 	// TODO if we add a hybrid mode for detecting HBONE/passthrough, also check that here
 	return l.TLS != nil && l.TLS.Options != nil && string(l.TLS.Options[constants.ListenerModeOption]) == mode
 }
+
+func GatewaySA(gw *v1beta1.Gateway) string {
+  return model.GetOrDefault(gw.GetAnnotations()[constants.GatewaySAOverride], fmt.Sprintf("%s-%s", gw.Name, gw.Spec.GatewayClassName)) 
+}
+
