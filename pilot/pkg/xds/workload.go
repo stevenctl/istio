@@ -71,6 +71,7 @@ func (e WorkloadGenerator) GenerateDeltas(
 
 	// TODO: it is needlessly wasteful to do a full sync just because the rest of Istio thought it was "full"
 	// The only things that can really trigger a "full" push here is trust domain or network changing, which is extremely rare
+	// We can handle network (gateway) changes in a more targeted way with WDS
 	// We do a full push for wildcard requests (initial proxy sync) or for full pushes with no ConfigsUpdates (since we don't know what changed)
 	full := (isReq && w.Wildcard) || (!isReq && req.Full && len(req.ConfigsUpdated) == 0)
 

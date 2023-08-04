@@ -36,6 +36,15 @@ func New[T comparable](items ...T) Set[T] {
 	return s.InsertAll(items...)
 }
 
+// Map converts each element
+func Map[T comparable, O comparable](original Set[T], fn func(T) O) Set[O] {
+	s := NewWithLength[O](len(original))
+	for t := range original {
+		s.Insert(fn(t))
+	}
+	return s
+}
+
 // Insert a single item to this Set.
 func (s Set[T]) Insert(item T) Set[T] {
 	s[item] = struct{}{}

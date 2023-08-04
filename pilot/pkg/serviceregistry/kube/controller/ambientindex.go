@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"istio.io/istio/pkg/network"
 	"net/netip"
 	"strings"
 	"sync"
@@ -76,9 +77,9 @@ type AmbientIndexImpl struct {
 	serviceByNamespacedHostname map[string]*model.ServiceInfo
 	// TODO(nmittler): Add serviceByHostname to support on-demand for DNS.
 
-	// networkGatewaysByAddressed are indexed by gateway IP
-	// TODO this should include gateways from other k8s service registries and from meshNetworks
-	networkGatewaysByAddress map[networkAddress]*model.AddressInfo
+	// networkGatewayAddresses are indexed by gateway address and network
+	// in this case, the address can be a hostname
+	networkGatewayAddresses map[networkAddress]*model.AddressInfo
 
 	// Map of Scope -> address
 	waypoints map[model.WaypointScope]*workloadapi.GatewayAddress
@@ -135,8 +136,8 @@ func (a *AmbientIndexImpl) Lookup(key string) []*model.AddressInfo {
 	}
 	res := make([]*model.AddressInfo, 0)
 	if _, err := netip.ParseAddr(ip); err != nil {
-		// Could be a network gateway even with non-IP
-		if w, f := a.networkGatewaysByAddress[networkAddress{network, ip}]; f {
+		// hostname based network gateway, this is an abuse of "namespace" as understood in NamespacedName
+		if w, f := a.networkGatewayAddresses[networkAddress{network, ip}]; f {
 			return []*model.AddressInfo{w}
 		}
 		// this must be namespace/hostname format
@@ -161,7 +162,7 @@ func (a *AmbientIndexImpl) Lookup(key string) []*model.AddressInfo {
 		return []*model.AddressInfo{workloadToAddressInfo(w.Workload)}
 	}
 	// Then, NetworkGateways
-	if w, f := a.networkGatewaysByAddress[networkAddress{network, ip}]; f {
+	if w, f := a.networkGatewayAddresses[networkAddress{network, ip}]; f {
 		return []*model.AddressInfo{w}
 	}
 	// Fallback to service. Note: these IP ranges should be non-overlapping
@@ -231,7 +232,7 @@ func (a *AmbientIndexImpl) All() []*model.AddressInfo {
 		res = append(res, serviceToAddressInfo(s.Service))
 	}
 
-	for _, gw := range a.networkGatewaysByAddress {
+	for _, gw := range a.networkGatewayAddresses {
 		res = append(res, gw)
 	}
 	return res
@@ -642,81 +643,88 @@ func toInternalNetworkAddresses(nwAddrs []*workloadapi.NetworkAddress) []network
 	return networkAddrs
 }
 
-func (a *AmbientIndexImpl) handleNetworkGateways(gws []model.NetworkGateway) sets.Set[model.ConfigKey] {
+func (a *AmbientIndexImpl) handleNetworkGateways(allGateways []model.NetworkGateway) sets.Set[model.ConfigKey] {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	// we can only send one gateway per network
+	// allGateways is sorted; we will consistently use the first one
+	gwsByNetwork := make(map[network.ID]model.NetworkGateway)
+	for _, gw := range allGateways {
+		if _, f := gwsByNetwork[gw.Network]; !f && gw.HBONEPort > 0 {
+			gwsByNetwork[gw.Network] = gw
+		}
+	}
+
+	// collect GatewayAddress to stick on endpoint workloads, and Address to propagate identity
 	updates := sets.New[model.ConfigKey]()
-	newGateways := make(map[networkAddress]*model.AddressInfo, len(gws))
+	newGateways := make(map[networkAddress]*model.AddressInfo, len(gwsByNetwork))
+	gwAddrs := make(map[network.ID]*workloadapi.GatewayAddress, len(gwsByNetwork))
+	for nw, gw := range gwsByNetwork {
+		addrInfo, gwAddr := convertGateway(gw)
+		newGateways[networkAddress{string(nw), gw.Addr}] = addrInfo
+		gwAddrs[nw] = gwAddr
 
-	for _, gw := range gws {
-		if gw.HBONEPort <= 0 {
-			continue
-		}
-		k := networkAddress{string(gw.Network), gw.Addr}
-		addrInfo := gatewayToAddressInfo(gw)
-		if addrInfo == nil {
-			continue
-		}
-		newGateways[k] = addrInfo
-		oldAddrInfo, f := a.networkGatewaysByAddress[k]
-
-		// added or updated
-		if !f || !proto.Equal(addrInfo, oldAddrInfo) {
+		// emit updates if something changed
+		oldAddrInfo, existing := a.networkGatewayAddresses[k]
+		if !existing || !proto.Equal(addrInfo, oldAddrInfo) {
 			updates.Insert(model.ConfigKey{Kind: kind.Address, Name: addrInfo.ResourceName()})
 		}
 	}
 
 	// emit updates for removed items
-	oldKeys := sets.New(maps.Keys(a.networkGatewaysByAddress)...)
+	oldKeys := sets.New(maps.Keys(a.networkGatewayAddresses)...)
 	newKeys := sets.New(maps.Keys(newGateways)...)
 	for removed := range oldKeys.Difference(newKeys) {
-		old := a.networkGatewaysByAddress[removed]
+		old := a.networkGatewayAddresses[removed]
 		updates.Insert(model.ConfigKey{Kind: kind.Address, Name: old.ResourceName()})
 	}
 
-	// TODO index by UID when available
-	a.networkGatewaysByAddress = newGateways
+	// trigger updates for affected workloads (include networks from old set so we can remove the gateway field)
+	oldNetworks := sets.Map(oldKeys, func(k networkAddress) string { return k.network })
+	newNetworks := sets.Map(newKeys, func(k networkAddress) string { return k.network })
+	allNetworks := newNetworks.Union(oldNetworks)
+	for _, wl := range a.byUID {
+		if !allNetworks.Contains(wl.Network) {
+			continue
+		}
+		gwAddr := gwAddrs[network.ID(wl.Network)]
+		if !proto.Equal(wl.NetworkGateway, gwAddr) {
+			updates.Insert(model.ConfigKey{Kind: kind.Address, Name: wl.ResourceName()})
+		}
+		wl.NetworkGateway = gwAddr
+	}
+
+	// index; also by uid when possible
+	a.networkGatewayAddresses = newGateways
+
 	return updates
 }
 
-func gatewayToAddressInfo(gw model.NetworkGateway) *model.AddressInfo {
+// convertGateway always converts a NetworkGateway into a Service
+func convertGateway(gw model.NetworkGateway) (*model.AddressInfo, *workloadapi.GatewayAddress) {
+	svc := &workloadapi.Address_Service{Service: &workloadapi.Service{
+		SubjectAltNames: []string{gw.SubjectAltName},
+	}}
+	gwAddr := &workloadapi.GatewayAddress{
+		Destination: &workloadapi.GatewayAddress_Hostname{Hostname: &workloadapi.NamespacedHostname{
+			Namespace: string(gw.Network),
+			Hostname:  gw.Addr,
+		}},
+		Port: gw.HBONEPort,
+	}
 	if ip, err := netip.ParseAddr(gw.Addr); err == nil {
-		uid := string(gw.Cluster) + "//" + "NetworkGateway/" + string(gw.Network) + "/" + gw.Addr
-		td := ""
-		if tdOverride := spiffe.GetTrustDomain(); tdOverride != "cluster.local" {
-			td = tdOverride
+		nwAddr := &workloadapi.NetworkAddress{
+			Network: string(gw.Network),
+			Address: ip.AsSlice(),
 		}
-		// TODO what if we can't parse it? For now it's always an SA.
-		id, _ := spiffe.ParseIdentity(gw.SubjectAltName)
-		return &model.AddressInfo{
-			Address: &workloadapi.Address{
-				Type: &workloadapi.Address_Workload{
-					Workload: &workloadapi.Workload{
-						Uid:            uid,
-						Addresses:      [][]byte{ip.AsSlice()},
-						Network:        string(gw.Network),
-						TunnelProtocol: workloadapi.TunnelProtocol_HBONE,
-						TrustDomain:    td,
-						Namespace:      id.Namespace,
-						ServiceAccount: id.ServiceAccount,
-						ClusterId:      string(gw.Cluster),
-					},
-				},
-			}}
+		svc.Service.Addresses = append(svc.Service.Addresses, nwAddr)
+		gwAddr.Destination = &workloadapi.GatewayAddress_Address{Address: nwAddr}
+	} else {
+		svc.Service.Hostname = gw.Addr
 	}
-
-	// hostname based gateway
-	return &model.AddressInfo{
-		Address: &workloadapi.Address{
-			Type: &workloadapi.Address_Service{Service: &workloadapi.Service{
-				Hostname:        gw.Addr,
-				Addresses:       nil,
-				Ports:           nil,
-				SubjectAltNames: []string{gw.SubjectAltName},
-			}},
-		},
-	}
+	ai := &model.AddressInfo{Address: &workloadapi.Address{Type: svc}}
+	return ai, gwAddr
 }
 
 // NOTE: Mutex is locked prior to being called.
