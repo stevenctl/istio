@@ -84,6 +84,14 @@ func FindFunc[E any](s []E, f func(E) bool) *E {
 	return &s[idx]
 }
 
+// FindDefaultFunc finds the first element matching the function, or the default if none do
+func FindDefaultFunc[E any](s []E, d E, f func(E) bool) E {
+	if o := FindFunc(s, f); o != nil {
+		return *o
+	}
+	return d
+}
+
 // Reverse returns its argument array reversed
 func Reverse[E any](r []E) []E {
 	for i, j := 0, len(r)-1; i < len(r)/2; i, j = i+1, j-1 {

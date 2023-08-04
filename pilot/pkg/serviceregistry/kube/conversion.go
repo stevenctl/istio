@@ -243,7 +243,7 @@ func IsAutoPassthrough(gwLabels map[string]string, l v1beta1.Listener) bool {
 	if l.TLS == nil {
 		return false
 	}
-	if hasListenerMode(l, constants.ListenerModeAutoPassthrough) {
+	if HasListenerMode(l, constants.ListenerModeAutoPassthrough) {
 		return true
 	}
 	_, networkSet := gwLabels[label.TopologyNetwork.Name]
@@ -257,7 +257,7 @@ func IsAutoPassthrough(gwLabels map[string]string, l v1beta1.Listener) bool {
 	return fmt.Sprint(l.Port) == expectedPort
 }
 
-func hasListenerMode(l v1beta1.Listener, mode string) bool {
+func HasListenerMode(l v1beta1.Listener, mode string) bool {
 	// TODO if we add a hybrid mode for detecting HBONE/passthrough, also check that here
 	return l.TLS != nil && l.TLS.Options != nil && string(l.TLS.Options[constants.ListenerModeOption]) == mode
 }

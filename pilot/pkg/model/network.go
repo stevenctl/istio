@@ -16,6 +16,7 @@ package model
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
 	"net"
 	"sort"
 	"strings"
@@ -46,10 +47,8 @@ type NetworkGateway struct {
 	Port uint32
 	// HBONEPort if non-zero indicates that the gateway supports HBONE
 	HBONEPort uint32
-	// SubjectAltName to validate in the outer-HBONE when sending to this double-HBONE gateway.
-	// TODO currently only implemented for k8s Gateway API
-	// TODO support multiple
-	SubjectAltName string
+	// ServiceAccount to validate in double HBONE
+	ServiceAccount types.NamespacedName
 }
 
 type NetworkGatewaysWatcher interface {

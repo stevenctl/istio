@@ -15,7 +15,6 @@
 package controller
 
 import (
-	"istio.io/istio/pkg/spiffe"
 	"net"
 	"strconv"
 	"sync"
@@ -383,14 +382,13 @@ func (n *networkManager) handleGatewayResource(_ controllers.Object, obj control
 		return nil
 	}
 
-	autoPassthrough := func(l v1beta1.Listener) bool {
-		return kube.IsAutoPassthrough(gw.GetLabels(), l)
-	}
-
 	base := model.NetworkGateway{
-		Network:        network.ID(gw.GetLabels()[label.TopologyNetwork.Name]),
-		Cluster:        n.clusterID,
-		SubjectAltName: spiffe.MustGenSpiffeURI(gw.Namespace, kube.GatewaySA(gw)),
+		Network: network.ID(gw.GetLabels()[label.TopologyNetwork.Name]),
+		Cluster: n.clusterID,
+		ServiceAccount: types.NamespacedName{
+			Namespace: gw.Namespace,
+			Name:      kube.GatewaySA(gw),
+		},
 	}
 	newGateways := model.NetworkGatewaySet{}
 	for _, addr := range gw.Spec.Addresses {
@@ -400,11 +398,17 @@ func (n *networkManager) handleGatewayResource(_ controllers.Object, obj control
 		if addrType := *addr.Type; addrType != v1beta1.IPAddressType && addrType != v1beta1.HostnameAddressType {
 			continue
 		}
-		for _, l := range slices.Filter(gw.Spec.Listeners, autoPassthrough) {
-			networkGateway := base
-			networkGateway.Addr = addr.Value
-			networkGateway.Port = uint32(l.Port)
-			newGateways.Insert(networkGateway)
+		networkGateway := base
+		networkGateway.Addr = addr.Value
+		networkGateway.Port = uint32(slices.FindDefaultFunc(gw.Spec.Listeners, v1beta1.Listener{}, func(l v1beta1.Listener) bool {
+			return kube.IsAutoPassthrough(gw.GetLabels(), l)
+		}).Port)
+		networkGateway.HBONEPort = uint32(slices.FindDefaultFunc(gw.Spec.Listeners, v1beta1.Listener{}, func(l v1beta1.Listener) bool {
+			return kube.HasListenerMode(l, "hbone")
+		}).Port)
+
+		if networkGateway.Port == 0 && networkGateway.HBONEPort == 0 {
+			continue
 		}
 	}
 	n.gatewaysFromResource[gw.UID] = newGateways

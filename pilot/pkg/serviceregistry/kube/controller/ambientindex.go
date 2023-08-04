@@ -17,6 +17,7 @@ package controller
 import (
 	"istio.io/istio/pkg/network"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -703,8 +704,10 @@ func (a *AmbientIndexImpl) handleNetworkGateways(allGateways []model.NetworkGate
 
 // convertGateway always converts a NetworkGateway into a Service
 func convertGateway(gw model.NetworkGateway) (*model.AddressInfo, *workloadapi.GatewayAddress) {
-	svc := &workloadapi.Address_Service{Service: &workloadapi.Service{
-		SubjectAltNames: []string{gw.SubjectAltName},
+	address := &workloadapi.Address_Workload{Workload: &workloadapi.Workload{
+		Uid:            "NetworkGateway/" + string(gw.Network) + "/" + gw.Addr + "/" + strconv.Itoa(int(gw.HBONEPort)),
+		ServiceAccount: gw.ServiceAccount.Name,
+		Namespace:      gw.ServiceAccount.Namespace,
 	}}
 	gwAddr := &workloadapi.GatewayAddress{
 		Destination: &workloadapi.GatewayAddress_Hostname{Hostname: &workloadapi.NamespacedHostname{
@@ -718,12 +721,12 @@ func convertGateway(gw model.NetworkGateway) (*model.AddressInfo, *workloadapi.G
 			Network: string(gw.Network),
 			Address: ip.AsSlice(),
 		}
-		svc.Service.Addresses = append(svc.Service.Addresses, nwAddr)
+		address.Workload.Addresses = append(address.Workload.Addresses, nwAddr)
 		gwAddr.Destination = &workloadapi.GatewayAddress_Address{Address: nwAddr}
 	} else {
-		svc.Service.Hostname = gw.Addr
+		address.Workload.Hostname = gw.Addr
 	}
-	ai := &model.AddressInfo{Address: &workloadapi.Address{Type: svc}}
+	ai := &model.AddressInfo{Address: &workloadapi.Address{Type: address}}
 	return ai, gwAddr
 }
 
