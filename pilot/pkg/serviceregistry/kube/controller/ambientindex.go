@@ -15,7 +15,8 @@
 package controller
 
 import (
-	"istio.io/istio/pkg/network"
+	"fmt"
+	"istio.io/istio/pkg/slices"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -78,9 +79,8 @@ type AmbientIndexImpl struct {
 	serviceByNamespacedHostname map[string]*model.ServiceInfo
 	// TODO(nmittler): Add serviceByHostname to support on-demand for DNS.
 
-	// networkGatewayAddresses are indexed by gateway address and network
-	// in this case, the address can be a hostname
-	networkGatewayAddresses map[networkAddress]*model.AddressInfo
+	// tracks the set of UIDs that belong to network gateways
+	networkGatewayWorkloads map[networkAddress]*model.WorkloadInfo
 
 	// Map of Scope -> address
 	waypoints map[model.WaypointScope]*workloadapi.GatewayAddress
@@ -137,9 +137,9 @@ func (a *AmbientIndexImpl) Lookup(key string) []*model.AddressInfo {
 	}
 	res := make([]*model.AddressInfo, 0)
 	if _, err := netip.ParseAddr(ip); err != nil {
-		// hostname based network gateway, this is an abuse of "namespace" as understood in NamespacedName
-		if w, f := a.networkGatewayAddresses[networkAddress{network, ip}]; f {
-			return []*model.AddressInfo{w}
+		// Check for hostname based network gateway workloads
+		if w, f := a.networkGatewayWorkloads[networkAddress{network, ip}]; f {
+			return []*model.AddressInfo{workloadToAddressInfo(w.Workload)}
 		}
 		// this must be namespace/hostname format
 		// lookup Service and any Workloads for that Service for each of the network addresses
@@ -162,9 +162,9 @@ func (a *AmbientIndexImpl) Lookup(key string) []*model.AddressInfo {
 	if w, f := a.byWorkloadEntry[networkAddr]; f {
 		return []*model.AddressInfo{workloadToAddressInfo(w.Workload)}
 	}
-	// Then, NetworkGateways
-	if w, f := a.networkGatewayAddresses[networkAddress{network, ip}]; f {
-		return []*model.AddressInfo{w}
+	// Then NetworkGateways
+	if w, f := a.networkGatewayWorkloads[networkAddr]; f {
+		return []*model.AddressInfo{workloadToAddressInfo(w.Workload)}
 	}
 	// Fallback to service. Note: these IP ranges should be non-overlapping
 	// When a Service lookup is performed, but it and its workloads are returned
@@ -233,7 +233,7 @@ func (a *AmbientIndexImpl) All() []*model.AddressInfo {
 		res = append(res, serviceToAddressInfo(s.Service))
 	}
 
-	for _, gw := range a.networkGatewayAddresses {
+	for _, gw := range a.networkGatewayWorkloads {
 		res = append(res, gw)
 	}
 	return res
@@ -644,90 +644,124 @@ func toInternalNetworkAddresses(nwAddrs []*workloadapi.NetworkAddress) []network
 	return networkAddrs
 }
 
+// handleNetworkGateways generates Workloads for each actual NetworkGateway and Services for each network
 func (a *AmbientIndexImpl) handleNetworkGateways(allGateways []model.NetworkGateway) sets.Set[model.ConfigKey] {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// we can only send one gateway per network
-	// allGateways is sorted; we will consistently use the first one
-	gwsByNetwork := make(map[network.ID]model.NetworkGateway)
-	for _, gw := range allGateways {
-		if _, f := gwsByNetwork[gw.Network]; !f && gw.HBONEPort > 0 {
-			gwsByNetwork[gw.Network] = gw
-		}
-	}
-
-	// collect GatewayAddress to stick on endpoint workloads, and Address to propagate identity
 	updates := sets.New[model.ConfigKey]()
-	newGateways := make(map[networkAddress]*model.AddressInfo, len(gwsByNetwork))
-	gwAddrs := make(map[network.ID]*workloadapi.GatewayAddress, len(gwsByNetwork))
-	for nw, gw := range gwsByNetwork {
-		addrInfo, gwAddr := convertGateway(gw)
-		newGateways[networkAddress{string(nw), gw.Addr}] = addrInfo
-		gwAddrs[nw] = gwAddr
+
+	// generate workloads for each item
+	newGateways := make(map[networkAddress]*model.WorkloadInfo, len(allGateways))
+	newNetworks := sets.New[string]()
+	for _, gw := range allGateways {
+		newNetworks.Insert(gw.Network.String())
+		k := networkAddress{gw.Network.String(), gw.Addr}
+		wi := convertGateway(gw)
+		newGateways[k] = wi
 
 		// emit updates if something changed
-		oldAddrInfo, existing := a.networkGatewayAddresses[k]
-		if !existing || !proto.Equal(addrInfo, oldAddrInfo) {
-			updates.Insert(model.ConfigKey{Kind: kind.Address, Name: addrInfo.ResourceName()})
+		oldAddrInfo, existing := a.networkGatewayWorkloads[k]
+		if !existing || !proto.Equal(wi, oldAddrInfo) {
+			updates.Insert(model.ConfigKey{Kind: kind.Address, Name: wi.ResourceName()})
 		}
 	}
 
-	// emit updates for removed items
-	oldKeys := sets.New(maps.Keys(a.networkGatewayAddresses)...)
-	newKeys := sets.New(maps.Keys(newGateways)...)
-	for removed := range oldKeys.Difference(newKeys) {
-		old := a.networkGatewayAddresses[removed]
-		updates.Insert(model.ConfigKey{Kind: kind.Address, Name: old.ResourceName()})
+	// generate services for each network
+	for nw := range newNetworks {
+		ns, hostname := networkGatewayHostname(nw)
+		k := fmt.Sprint(ns, "/", hostname)
+		si := &model.ServiceInfo{
+			Service: &workloadapi.Service{
+				Name:      hostname,
+				Namespace: ns,
+				Hostname:  hostname,
+				Ports:     []*workloadapi.Port{{ServicePort: 15008}},
+			}}
+
+		// emit updates if something changed
+		oldAddrInfo, existing := a.serviceByNamespacedHostname[k]
+		if !existing || !proto.Equal(si, oldAddrInfo) {
+			updates.Insert(model.ConfigKey{Kind: kind.Address, Name: si.ResourceName()})
+		}
+
+		a.serviceByNamespacedHostname[k] = si
 	}
 
-	// trigger updates for affected workloads (include networks from old set so we can remove the gateway field)
-	oldNetworks := sets.Map(oldKeys, func(k networkAddress) string { return k.network })
-	newNetworks := sets.Map(newKeys, func(k networkAddress) string { return k.network })
-	allNetworks := newNetworks.Union(oldNetworks)
-	for _, wl := range a.byUID {
-		if !allNetworks.Contains(wl.Network) {
-			continue
+	// check for removals (services)
+	oldNetworks := sets.New(slices.Map(maps.Keys(a.networkGatewayWorkloads), func(e networkAddress) string {
+		return e.network
+	})...)
+	for oldNw := range oldNetworks {
+		if !newNetworks.Contains(oldNw) {
+			ns, hostname := networkGatewayHostname(oldNw)
+			k := fmt.Sprint(ns, "/", hostname)
+			if si, f := a.serviceByNamespacedHostname[k]; f {
+				updates.Insert(model.ConfigKey{Kind: kind.Address, Name: si.ResourceName()})
+				delete(a.serviceByNamespacedHostname, k)
+			}
 		}
-		gwAddr := gwAddrs[network.ID(wl.Network)]
-		if !proto.Equal(wl.NetworkGateway, gwAddr) {
-			updates.Insert(model.ConfigKey{Kind: kind.Address, Name: wl.ResourceName()})
-		}
-		wl.NetworkGateway = gwAddr
 	}
 
-	// index; also by uid when possible
-	a.networkGatewayAddresses = newGateways
+	// check for removals (workloads)
+	for k, oldGw := range a.networkGatewayWorkloads {
+		_, f := newGateways[k]
+		if !f {
+			// update uid map; networkGatewayWorkloads gets replaced later
+			delete(a.byUID, oldGw.Uid)
+			updates.Insert(model.ConfigKey{Kind: kind.Address, Name: oldGw.ResourceName()})
+		}
+	}
+
+	// update indexes
+	a.networkGatewayWorkloads = newGateways
+	for _, wi := range newGateways {
+		a.byUID[wi.Uid] = wi
+	}
 
 	return updates
 }
 
-// convertGateway always converts a NetworkGateway into a Service
-func convertGateway(gw model.NetworkGateway) (*model.AddressInfo, *workloadapi.GatewayAddress) {
-	address := &workloadapi.Address_Workload{Workload: &workloadapi.Workload{
-		Uid:            "NetworkGateway/" + string(gw.Network) + "/" + gw.Addr + "/" + strconv.Itoa(int(gw.HBONEPort)),
+func gatewayUID(gw model.NetworkGateway) string {
+	return "NetworkGateway/" + string(gw.Network) + "/" + gw.Addr + "/" + strconv.Itoa(int(gw.HBONEPort))
+}
+
+// convertGateway always converts a NetworkGateway into a Workload
+func convertGateway(gw model.NetworkGateway) *model.WorkloadInfo {
+	wl := &workloadapi.Workload{
+		Uid:            gatewayUID(gw),
 		ServiceAccount: gw.ServiceAccount.Name,
 		Namespace:      gw.ServiceAccount.Namespace,
-	}}
-	gwAddr := &workloadapi.GatewayAddress{
-		Destination: &workloadapi.GatewayAddress_Hostname{Hostname: &workloadapi.NamespacedHostname{
-			Namespace: string(gw.Network),
-			Hostname:  gw.Addr,
-		}},
-		Port: gw.HBONEPort,
+		Network:        gw.Network.String(),
+		Services: map[string]*workloadapi.PortList{
+			namespacedHostname(networkGatewayHostname(gw.Network.String())): {
+				Ports: []*workloadapi.Port{{
+					ServicePort: 15008,
+					TargetPort:  gw.HBONEPort,
+				}},
+			},
+		},
 	}
+
 	if ip, err := netip.ParseAddr(gw.Addr); err == nil {
-		nwAddr := &workloadapi.NetworkAddress{
-			Network: string(gw.Network),
-			Address: ip.AsSlice(),
-		}
-		address.Workload.Addresses = append(address.Workload.Addresses, nwAddr)
-		gwAddr.Destination = &workloadapi.GatewayAddress_Address{Address: nwAddr}
+		wl.Addresses = append(wl.Workload.Addresses, ip.AsSlice())
 	} else {
-		address.Workload.Hostname = gw.Addr
+		wl.Hostname = gw.Addr
 	}
-	ai := &model.AddressInfo{Address: &workloadapi.Address{Type: address}}
-	return ai, gwAddr
+	return &model.WorkloadInfo{Workload: wl}
+}
+
+func networkGatewayAddress(network string) *workloadapi.GatewayAddress {
+	ns, host := networkGatewayHostname(network)
+	return &workloadapi.GatewayAddress{Destination: &workloadapi.GatewayAddress_Hostname{
+		Hostname: &workloadapi.NamespacedHostname{
+			Namespace: ns, Hostname: host,
+		},
+	}}
+}
+
+func networkGatewayHostname(network string) (string, string) {
+	return "istio-reserved", fmt.Sprint(network, "-networkgateway")
 }
 
 // NOTE: Mutex is locked prior to being called.
@@ -906,12 +940,14 @@ func (a *AmbientIndexImpl) constructWorkload(pod *v1.Pod, waypoint *workloadapi.
 		workloadServices[nsName] = ports
 	}
 
+	wlNetwork := c.Network(pod.Status.PodIP, pod.Labels).String()
 	wl := &workloadapi.Workload{
 		Uid:                   c.generatePodUID(pod),
 		Name:                  pod.Name,
 		Addresses:             addresses,
 		Hostname:              pod.Spec.Hostname,
-		Network:               c.Network(pod.Status.PodIP, pod.Labels).String(),
+		Network:               wlNetwork,
+		NetworkGateway:        networkGatewayAddress(wlNetwork),
 		Namespace:             pod.Namespace,
 		ServiceAccount:        pod.Spec.ServiceAccountName,
 		Node:                  pod.Spec.NodeName,

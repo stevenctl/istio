@@ -391,6 +391,7 @@ func (a *AmbientIndexImpl) constructWorkloadFromWorkloadEntry(workloadEntry *v1a
 		Namespace:             workloadEntryNamespace,
 		Addresses:             addresses,
 		Network:               network,
+		NetworkGateway:        networkGatewayAddress(network),
 		ServiceAccount:        workloadEntry.ServiceAccount,
 		Services:              workloadServices,
 		AuthorizationPolicies: policies,
