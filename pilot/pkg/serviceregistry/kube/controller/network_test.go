@@ -16,6 +16,7 @@ package controller
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
 	"sync"
 	"testing"
 	"time"
@@ -100,16 +101,41 @@ func TestNetworkUpdateTriggers(t *testing.T) {
 		addLabeledServiceGateway(t, c, "nw1")
 		expectGateways(t, 3)
 	})
+	passthroughMode := v1beta1.TLSModePassthrough
 	t.Run("add kubernetes gateway", func(t *testing.T) {
-		addOrUpdateGatewayResource(t, c, 35443)
+		addOrUpdateGatewayResource(t, c, "by-number", v1beta1.Listener{
+			Name: "detected-by-number",
+			TLS:  &v1beta1.GatewayTLSConfig{Mode: &passthroughMode},
+			Port: 15443,
+		})
+		addOrUpdateGatewayResource(t, c, "by-options", v1beta1.Listener{
+			Name: "detected-by-options",
+			TLS: &v1beta1.GatewayTLSConfig{
+				Mode: &passthroughMode,
+				Options: map[v1beta1.AnnotationKey]v1beta1.AnnotationValue{
+					constants.ListenerModeOption: constants.ListenerModeAutoPassthrough,
+				},
+			},
+			Port: v1beta1.PortNumber(35443),
+		})
 		expectGateways(t, 7)
 	})
 	t.Run("update kubernetes gateway", func(t *testing.T) {
-		addOrUpdateGatewayResource(t, c, 45443)
+		addOrUpdateGatewayResource(t, c, "by-options", v1beta1.Listener{
+			Name: "detected-by-options",
+			TLS: &v1beta1.GatewayTLSConfig{
+				Mode: &passthroughMode,
+				Options: map[v1beta1.AnnotationKey]v1beta1.AnnotationValue{
+					constants.ListenerModeOption: constants.ListenerModeAutoPassthrough,
+				},
+			},
+			Port: v1beta1.PortNumber(45443),
+		})
 		expectGateways(t, 7)
 	})
 	t.Run("remove kubernetes gateway", func(t *testing.T) {
-		removeGatewayResource(t, c)
+		removeGatewayResource(t, c, "by-number")
+		removeGatewayResource(t, c, "by-options")
 		expectGateways(t, 3)
 	})
 	t.Run("remove labeled service", func(t *testing.T) {
@@ -143,15 +169,15 @@ func removeLabeledServiceGateway(t *testing.T, c *FakeController) {
 	clienttest.Wrap(t, c.services).Delete("istio-labeled-gw", "arbitrary-ns")
 }
 
-// creates a gateway that exposes 2 ports that are valid auto-passthrough ports
-// and it does so on an IP and a hostname
-func addOrUpdateGatewayResource(t *testing.T, c *FakeController, customPort int) {
-	passthroughMode := v1beta1.TLSModePassthrough
+// addOrUpdateGatewayResource that is expanded to 2 NetworkGateways. One IP and one Hostname.
+// It may result in 0 if the listener provided isn't valid for network gateways.
+func addOrUpdateGatewayResource(t *testing.T, c *FakeController, name string, listener v1beta1.Listener) {
 	ipType := v1beta1.IPAddressType
 	hostnameType := v1beta1.HostnameAddressType
 	clienttest.Wrap(t, kclient.New[*v1beta1.Gateway](c.client)).CreateOrUpdate(&v1beta1.Gateway{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "eastwest-gwapi",
+			UID:       types.UID(name),
+			Name:      name,
 			Namespace: "istio-system",
 			Labels:    map[string]string{label.TopologyNetwork.Name: "nw2"},
 		},
@@ -161,30 +187,14 @@ func addOrUpdateGatewayResource(t *testing.T, c *FakeController, customPort int)
 				{Type: &ipType, Value: "1.2.3.4"},
 				{Type: &hostnameType, Value: "some hostname"},
 			},
-			Listeners: []v1beta1.Listener{
-				{
-					Name: "detected-by-options",
-					TLS: &v1beta1.GatewayTLSConfig{
-						Mode: &passthroughMode,
-						Options: map[v1beta1.AnnotationKey]v1beta1.AnnotationValue{
-							constants.ListenerModeOption: constants.ListenerModeAutoPassthrough,
-						},
-					},
-					Port: v1beta1.PortNumber(customPort),
-				},
-				{
-					Name: "detected-by-number",
-					TLS:  &v1beta1.GatewayTLSConfig{Mode: &passthroughMode},
-					Port: 15443,
-				},
-			},
+			Listeners: []v1beta1.Listener{listener},
 		},
 		Status: v1beta1.GatewayStatus{},
 	})
 }
 
-func removeGatewayResource(t *testing.T, c *FakeController) {
-	clienttest.Wrap(t, kclient.New[*v1beta1.Gateway](c.client)).Delete("eastwest-gwapi", "istio-system")
+func removeGatewayResource(t *testing.T, c *FakeController, name string) {
+	clienttest.Wrap(t, kclient.New[*v1beta1.Gateway](c.client)).Delete(name, "istio-system")
 }
 
 func addMeshNetworksFromRegistryGateway(t *testing.T, c *FakeController, watcher mesh.NetworksWatcher) {

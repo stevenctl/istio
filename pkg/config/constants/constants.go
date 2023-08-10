@@ -169,9 +169,10 @@ const (
 	GatewaySAOverride = "gateway.istio.io/service-account"
 
 	// TODO formalize this API
-	// TODO additional values to represent passthrough and hbone or both
+	// TODO additional value to represent both/auto-detect
 	ListenerModeOption          = "gateway.istio.io/listener-protocol"
 	ListenerModeAutoPassthrough = "auto-passthrough"
+	ListenerModeHBONE           = "hbone"
 
 	// DataplaneMode namespace label for determining ambient mesh behavior
 	DataplaneMode        = "istio.io/dataplane-mode"

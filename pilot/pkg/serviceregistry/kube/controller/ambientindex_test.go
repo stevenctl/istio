@@ -126,6 +126,7 @@ func TestAmbientIndex_LookupWorkloads(t *testing.T) {
 							Namespace:         testNS,
 							Addresses:         [][]byte{netip.MustParseAddr("127.0.0.3").AsSlice()},
 							Network:           testNW,
+							NetworkGateway:    networkGatewayAddress(testNW),
 							ServiceAccount:    "sa1",
 							Uid:               s.podXdsName("pod3"),
 							Node:              "node1",

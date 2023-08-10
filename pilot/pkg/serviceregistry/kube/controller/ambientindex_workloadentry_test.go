@@ -52,6 +52,7 @@ func TestAmbientIndex_WorkloadEntries(t *testing.T) {
 					Name:              "name3",
 					Namespace:         testNS,
 					Network:           testNW,
+					NetworkGateway:    networkGatewayAddress(testNW),
 					Addresses:         [][]byte{parseIP("127.0.0.3")},
 					ServiceAccount:    "sa3",
 					Node:              "",
