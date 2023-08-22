@@ -15,6 +15,7 @@
 package v1alpha3
 
 import (
+	"istio.io/istio/pilot/pkg/networking/util"
 	"testing"
 
 	networking "istio.io/api/networking/v1alpha3"
@@ -282,7 +283,7 @@ func TestMergeTrafficPolicy(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			policy := MergeTrafficPolicy(tt.original, tt.subset, tt.port)
+			policy := util.MergeTrafficPolicy(tt.original, tt.subset, tt.port)
 			assert.Equal(t, policy, tt.expected)
 		})
 	}
