@@ -65,7 +65,11 @@ type ConfigInput struct {
 	Services int
 	// Number of instances to make
 	Instances int
-	// Type of proxy to generate configs for
+	// Number of principals to check in authz
+	Principals int
+	// If set, only run for this config type
+	SkipType string
+	// ResourceType of proxy to generate configs for. If not set, sidecar is used
 	ProxyType model.NodeType
 }
 
@@ -104,19 +108,6 @@ var testCases = []ConfigInput{
 	{
 		Name:     "virtualservice",
 		Services: 100,
-	},
-	{
-		Name:     "authorizationpolicy",
-		Services: 100,
-	},
-	{
-		Name:     "peerauthentication",
-		Services: 100,
-	},
-	{
-		Name:      "knative-gateway",
-		Services:  100,
-		ProxyType: model.Router,
 	},
 	{
 		Name:      "serviceentry-workloadentry",
@@ -199,7 +190,16 @@ func TestClusterGeneration(t *testing.T) {
 }
 
 func BenchmarkListenerGeneration(b *testing.B) {
-	runBenchmark(b, v3.ListenerType, testCases)
+	b.ReportAllocs()
+	cases := testCases
+	for _, n := range []int{1, 100, 200, 400, 800, 1600} {
+		cases = append(cases, ConfigInput{
+			Name:       "authorizationpolicy",
+			Services:   1,
+			Principals: n,
+		})
+	}
+	runBenchmark(b, v3.ListenerType, cases)
 }
 
 func TestListenerGeneration(t *testing.T) {
@@ -302,6 +302,7 @@ func runBenchmark(b *testing.B, tpe string, testCases []ConfigInput) {
 		b.Run(tt.Name, func(b *testing.B) {
 			s, proxy := setupAndInitializeTest(b, tt)
 			wr := getWatchedResources(tpe, tt, s, proxy)
+			b.ReportAllocs()
 			b.ResetTimer()
 			var c model.Resources
 			for n := 0; n < b.N; n++ {

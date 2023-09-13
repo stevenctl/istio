@@ -30,6 +30,16 @@ spec:
     - from:
         - source:
             namespaces: ["default"]
+        - source:
+            principals:
+            {{- range $k := until $.Principals }}
+              - principal-{{$k}}
+            {{- end }}
+            ports:
+              - 8080
+              - 9090
+              - 9091
+              - 9092
       to:
         - operation:
             methods: ["POST"]
