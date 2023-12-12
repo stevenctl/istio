@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "clientNode": { "type": "string" },
+    "serverNode": { "type": "string" },
+    "waypointNode": { "type": "string" },
+
+
+    "image": { "type": "string" },
+    "hub": { "type": "string" },
+    "tag": { "type": "string" },
+
+    "nighthawkIP": { "type": "string" },
+    "iperfIP": { "type": "string" }
+  },
+  "additionalProperties": false
+}

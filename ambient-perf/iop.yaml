@@ -1,0 +1,22 @@
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: install
+spec:
+  profile: ambient
+  components:
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: false
+  values:
+    ztunnel:
+      meshConfig:
+        defaultConfig:
+          proxyMetadata:
+            ISTIO_META_DNS_CAPTURE: "true"
+            ISTIO_META_DNS_PROXY_ADDR: "127.0.0.1:15053"
+    meshConfig:
+      defaultConfig:
+        proxyMetadata:
+          ISTIO_META_DNS_CAPTURE: "true"
+          ISTIO_META_DNS_PROXY_ADDR: "127.0.0.1:15053"

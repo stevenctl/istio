@@ -1,0 +1,2 @@
+clientNode: istio-testing-worker
+serverNode: istio-testing-worker2

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nighthawk
+description: nighthawk client and server
+version: 1.0.0
+appVersion: 1.0.0
+type: application

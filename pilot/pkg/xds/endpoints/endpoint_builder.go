@@ -213,6 +213,8 @@ func (b *EndpointBuilder) WriteHash(h hash.Hash) {
 	h.Write(Separator)
 	h.WriteString(strconv.FormatBool(b.clusterLocal))
 	h.Write(Separator)
+	h.Write([]byte(strconv.FormatBool(bool(b.proxy.Metadata.Sandwich))))
+	h.Write(Separator)
 	if features.EnableHBONE && b.proxy != nil {
 		h.WriteString(strconv.FormatBool(b.proxy.IsProxylessGrpc()))
 		h.Write(Separator)

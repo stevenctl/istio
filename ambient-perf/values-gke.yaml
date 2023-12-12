@@ -1,0 +1,4 @@
+clientNode: gke-landow-test-default-pool-f94eb8aa-792k
+serverNode: gke-landow-test-default-pool-f94eb8aa-8xhs
+waypointNode: gke-landow-test-default-pool-f94eb8aa-9zgs
+hub: gcr.io/solo-test-236622/landow

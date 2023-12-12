@@ -718,6 +718,9 @@ type NodeMetadata struct {
 	// The istiod address when running ASM Managed Control Plane.
 	CloudrunAddr string `json:"CLOUDRUN_ADDR,omitempty"`
 
+	// Sandwich wyaoint proxies don't handle their own mTLS/HBONe
+	Sandwich StringBool `json:SANDWICH,omitempty`
+
 	// Metadata discovery service enablement
 	MetadataDiscovery StringBool `json:"METADATA_DISCOVERY,omitempty"`
 
@@ -1306,7 +1309,7 @@ func (node *Proxy) FuzzValidate() bool {
 }
 
 func (node *Proxy) EnableHBONE() bool {
-	return node.IsAmbient() || (features.EnableHBONE && bool(node.Metadata.EnableHBONE))
+	return !bool(node.Metadata.Sandwich) && (node.IsAmbient() || (features.EnableHBONE && bool(node.Metadata.EnableHBONE)))
 }
 
 // WaypointScope is either an entire namespace or an individual service account

@@ -1,0 +1,4 @@
+clientNode: ambient-worker2
+serverNode: ambient-control-plane
+waypointNode: ambient-worker
+hub: localhost:5000

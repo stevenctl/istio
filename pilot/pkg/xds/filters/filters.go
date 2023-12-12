@@ -145,6 +145,42 @@ var (
 			TypedConfig: protoconv.MessageToAny(&proxy_proto.ProxyProtocol{}),
 		},
 	}
+
+	// ProxyProtocolTLV requires proxy protocol headers to be sent, and extracts the header
+	// used by IstioTLVAuthenticationFilterShared to set the peer identity
+	ProxyProtocolTLV = &listener.ListenerFilter{
+		Name: wellknown.ProxyProtocol,
+		ConfigType: &listener.ListenerFilter_TypedConfig{
+			// TODO don't need both Rules and PassThroughTlvs
+			TypedConfig: protoconv.MessageToAny(&proxy_proto.ProxyProtocol{
+				AllowRequestsWithoutProxyProtocol: false,
+				Rules: []*proxy_proto.ProxyProtocol_Rule{{
+					TlvType: 0xD0,
+					OnTlvPresent: &proxy_proto.ProxyProtocol_KeyValuePair{
+						Key: "peer_identity",
+					},
+				}},
+				PassThroughTlvs: &core.ProxyProtocolPassThroughTLVs{
+					MatchType: core.ProxyProtocolPassThroughTLVs_INCLUDE_ALL,
+					TlvType:   []uint32{0xD0},
+				},
+			}),
+		},
+	}
+
+	// IstioTLVAuthenticationFilterShared currently sets the peer identity directly
+	// from the PROXY TLV header. In the future, this should be a JWT that we can validate
+	// the signature for.
+	IstioTLVAuthenticationFilterShared = &listener.Filter{
+		Name: "istio_tlv_authn",
+		ConfigType: &listener.Filter_TypedConfig{
+			TypedConfig: protoconv.TypedStructWithFields("type.googleapis.com/io.istio.network.tlv_authn.Config",
+				map[string]interface{}{
+					"shared": true,
+				}),
+		},
+	}
+
 	EmptySessionFilter = &hcm.HttpFilter{
 		Name: util.StatefulSessionFilter,
 		ConfigType: &hcm.HttpFilter_TypedConfig{

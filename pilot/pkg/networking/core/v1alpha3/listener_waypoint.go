@@ -64,10 +64,12 @@ func (lb *ListenerBuilder) buildWaypointInbound() []*listener.Listener {
 	// 3. Encapsulation CONNECT listener, originating the tunnel
 	wls, wps := findWaypointResources(lb.node, lb.push)
 
-	listeners = append(listeners,
-		lb.buildWaypointInboundConnectTerminate(),
-		lb.buildWaypointInternal(wls, wps.orderedServices),
-		buildWaypointConnectOriginateListener())
+	if !lb.node.Metadata.Sandwich {
+		listeners = append(listeners,
+			lb.buildWaypointInboundConnectTerminate(),
+			buildWaypointConnectOriginateListener())
+	}
+	listeners = append(listeners, lb.buildWaypointInternal(wls, wps.orderedServices))
 
 	return listeners
 }
@@ -184,7 +186,7 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 					TargetPort:  uint32(port.Port),
 				},
 				bind:  "0.0.0.0",
-				hbone: true,
+				hbone: lb.node.EnableHBONE(),
 			}
 			name := model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "", svc.Hostname, port.Port)
 			tcpName := name + "-tcp"
@@ -238,7 +240,7 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 				},
 			},
 			bind:  "0.0.0.0",
-			hbone: true,
+			hbone: lb.node.EnableHBONE(),
 		}
 		tcpChain := &listener.FilterChain{
 			Filters: append([]*listener.Filter{
@@ -279,6 +281,7 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 				})
 		}
 	}
+
 	l := &listener.Listener{
 		Name:              MainInternalName,
 		ListenerSpecifier: &listener.Listener_InternalListener{InternalListener: &listener.Listener_InternalListenerConfig{}},
@@ -303,9 +306,30 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 			},
 		},
 	}
+
+	// TODO(sandwich) avoid mutating, make it more pure-functional
+	if lb.node.Metadata.Sandwich {
+		// Sandwich uses ProxyProtocol (with TLV carrying auth info)
+		l.ListenerFilters[0] = xdsfilters.ProxyProtocolTLV
+		// That TLV needs to be processed to set peer principal
+		for _, fc := range chains {
+			fc.Filters = append([]*listener.Filter{
+				xdsfilters.IstioTLVAuthenticationFilterShared,
+			}, fc.Filters...)
+		}
+		l.Address = &core.Address{Address: &core.Address_SocketAddress{
+			// TODO(sandwich) use a pipe or at least avoid binding to 0.0.0.0
+			SocketAddress: &core.SocketAddress{
+				Address: "0.0.0.0",
+				// TODO(sandwich) fix 15008 already in use
+				PortSpecifier: &core.SocketAddress_PortValue{PortValue: 15088},
+			},
+		}}
+		l.ListenerSpecifier = nil
+	}
+
 	return l
 }
-
 func buildWaypointConnectOriginateListener() *listener.Listener {
 	return buildConnectOriginateListener()
 }

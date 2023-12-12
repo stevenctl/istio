@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nighthawk-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nighthawk-client
+  template:
+    metadata:
+      labels:
+        app: nighthawk-client
+    spec:
+    {{- if .Values.clientNode }}
+      nodeName: {{ .Values.clientNode }}
+    {{- end }}
+      containers:
+      - name: nighthawk-client
+        image: {{ .Values.image }}
+        command: [ "sleep", "infinity" ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nighthawk-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nighthawk-server
+  template:
+    metadata:
+      labels:
+        app: nighthawk-server
+    spec:
+    {{- if .Values.serverNode }}
+      nodeName: {{ .Values.serverNode }}
+    {{- end }}
+      volumes:
+      - name: config-volume
+        configMap:
+          name: nighthawk-server-config
+      containers:
+      - name: nighthawk-server
+        image: {{ .Values.image }}
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/nighthawk
+        command: 
+        - nighthawk_test_server
+        - --config-path
+        - /etc/nighthawk/config.yaml
+        ports:
+        - containerPort: 8081
+        - containerPort: 10000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nighthawk-server-config
+data:
+  config.yaml: |
+{{ .Files.Get "test_server.yaml" | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nighthawk-server
+spec:
+  ports:
+  - port: 10000
+    protocol: TCP
+    name: http
+  selector:
+    app: nighthawk-server
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nighthawk-server-headless
+spec:
+  clusterIP: None
+  ports:
+  - port: 10000
+    protocol: TCP
+    name: http
+  selector:
+    app: nighthawk-server

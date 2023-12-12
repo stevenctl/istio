@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iperf-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iperf-client
+  template:
+    metadata:
+      labels:
+        app: iperf-client
+    spec:
+    {{- if .Values.clientNode }}
+      nodeName: {{ .Values.clientNode }}
+    {{- end }}
+      containers:
+      - name: iperf-client
+        image: docker.io/networkstatic/iperf3:latest
+        command: [ "sleep", "infinity" ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iperf-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iperf-server
+  template:
+    metadata:
+      labels:
+        app: iperf-server
+    spec:
+    {{- if .Values.serverNode }}
+      nodeName: {{ .Values.serverNode }}
+    {{- end }}
+      containers:
+      - name: iperf-server
+        image: docker.io/networkstatic/iperf3:latest
+        args: [ "-s" ]
+        ports:
+        - containerPort: 5201
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iperf-server
+spec:
+  ports:
+  - port: 5201
+    protocol: TCP
+    name: tcp
+  selector:
+    app: iperf-server
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iperf-server-headless
+spec:
+  clusterIP: None
+  ports:
+  - port: 5201
+    protocol: TCP
+    name: tcp
+  selector:
+    app: iperf-server

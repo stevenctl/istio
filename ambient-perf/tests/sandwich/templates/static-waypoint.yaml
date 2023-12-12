@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: static-waypoint
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: static-waypoint
+  template:
+    metadata:
+      labels:
+        app: static-waypoint
+    spec:
+    {{- if .Values.waypointNode }}
+      nodeName: {{ .Values.waypointNode }}
+    {{- end }}
+      containers:
+      - name: static-waypoint
+        image: {{.Values.hub}}/proxyv2:{{.Values.tag}}
+        command: 
+        - envoy
+        - --config-path
+        - /etc/envoy/envoy.yaml
+        - --drain-strategy 
+        - immediate
+        - --local-address-ip-version
+        - v4
+        - --file-flush-interval-msec
+        - "1000"
+        ports:
+        - containerPort: 5201
+        volumeMounts:
+        - name: static-waypoint-config
+          mountPath: "/etc/envoy"
+      volumes:
+      - name: static-waypoint-config
+        configMap:
+          name: static-waypoint-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: static-waypoint
+spec:
+  clusterIP: None
+  ports:
+  - port: 5201
+    name: tcp
+    protocol: TCP
+  - port: 10000
+    name: http
+    protocol: TCP
+  selector:
+    app: static-waypoint
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: static-waypoint-config
+data:
+  envoy.yaml: |-
+{{- include "static_config" . | indent 4}}

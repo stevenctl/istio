@@ -1,0 +1,5 @@
+waypointNode: ambient-control-plane
+hub: localhost:5000
+tag: sandwich-test
+# nighthawkIP: 10.244.1.22
+# iperfIP: 10.244.1.23

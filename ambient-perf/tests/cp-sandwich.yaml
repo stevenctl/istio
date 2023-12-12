@@ -1,0 +1,11 @@
+apiVersion: networking.istio.io/v1beta1
+kind: ProxyConfig
+metadata:
+  name: sandwich-waypoint
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      istio.io/gateway-name: namespace
+  environmentVariables:
+    ISTIO_META_SANDWICH: "true"
