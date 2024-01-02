@@ -15,8 +15,10 @@
 package ca
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/golang-jwt/jwt"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -110,7 +112,8 @@ func (s *Server) CreateCertificate(ctx context.Context, request *pb.IstioCertifi
 	}
 	serverCaLog.Debugf("generating a certificate, sans: %v, requested ttl: %s", sans, time.Duration(request.ValidityDuration*int64(time.Second)))
 	certSigner := crMetadata[security.CertSigner].GetStringValue()
-	_, _, certChainBytes, rootCertBytes := s.ca.GetCAKeyCertBundle().GetAll()
+	keyCertBundle := s.ca.GetCAKeyCertBundle()
+	_, privKey, certChainBytes, rootCertBytes := keyCertBundle.GetAll()
 	certOpts := ca.CertOpts{
 		SubjectIDs: sans,
 		TTL:        time.Duration(request.ValidityDuration) * time.Second,
@@ -146,7 +149,64 @@ func (s *Server) CreateCertificate(ctx context.Context, request *pb.IstioCertifi
 	}
 	s.monitoring.Success.Increment()
 	serverCaLog.Debugf("CSR successfully signed, sans %v.", caller.Identities)
+
+	if impersonatedIdentity != "" {
+		// TODO maybe make this conditional on something in request.Metadata
+		// Sign and add JWT to response
+    signingMethod, err := jwtSigningMethod(keyCertBundle)
+    if err != nil {
+      return nil, err
+    }
+		token := jwt.NewWithClaims(signingMethod, jwt.MapClaims{
+			"sub": impersonatedIdentity,
+			"aud": []string{"ztunnel-inbound", "waypoint-inbound-sandwich"},
+			"exp": "TODO",
+		})
+		tokenString, err := token.SignedString(privKey)
+		if err != nil {
+			// TODO log
+			return nil, err
+		}
+		response.Jwt = &tokenString
+	}
+
 	return response, nil
+}
+
+func jwtSigningMethod(bundle *util.KeyCertBundle) (jwt.SigningMethod, error) {
+	opts, err := bundle.CertOptions()
+	if err != nil {
+		return nil, err
+	}
+
+  // ECDSA
+	if opts.ECSigAlg != "" {
+    switch opts.ECCCurve {
+    case util.P256Curve:
+      return jwt.SigningMethodES256, nil
+    case util.P384Curve:
+      return jwt.SigningMethodES384, nil
+		default:
+			return nil, fmt.Errorf("unknown ECC curve: %d", opts.RSAKeySize)
+    }
+  }
+
+  // RSA
+	if opts.ECSigAlg == "" && opts.RSAKeySize != 0 {
+		switch opts.RSAKeySize {
+		case 256:
+			return jwt.SigningMethodRS256, nil
+		case 384:
+			return jwt.SigningMethodRS384, nil
+		case 512:
+			return jwt.SigningMethodRS512, nil
+		default:
+			return nil, fmt.Errorf("unknown RSA key size: %d", opts.RSAKeySize)
+		}
+	}
+
+	// should have been caught in bundle.CertOptions() call
+	return nil, fmt.Errorf("unknown signing method")
 }
 
 func recordCertsExpiry(keyCertBundle *util.KeyCertBundle) {

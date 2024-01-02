@@ -5,6 +5,12 @@ go 1.21
 // Client-go does not handle different versions of mergo due to some breaking changes - use the matching version
 replace github.com/imdario/mergo => github.com/imdario/mergo v0.3.5
 
+// For sandwich prototype (JWT in CA respponse)
+replace (
+	istio.io/api => github.com/stevenctl/api v0.0.0-20240102123403-5dd926f0432d
+	istio.io/client-go => github.com/stevenctl/istio-client-go v0.0.0-20240102124518-c43cbb00d71c
+)
+
 require (
 	cloud.google.com/go/compute/metadata v0.2.3
 	cloud.google.com/go/logging v1.9.0
@@ -36,6 +42,7 @@ require (
 	github.com/go-jose/go-jose/v3 v3.0.1
 	github.com/go-logr/logr v1.3.0
 	github.com/gogo/protobuf v1.3.2
+	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/golang/protobuf v1.5.3
 	github.com/google/cel-go v0.17.7
 	github.com/google/go-cmp v0.6.0
