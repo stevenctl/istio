@@ -1,4 +1,4 @@
-# image: docker.io/envoyproxy/nighthawk-dev:latest
+image: docker.io/envoyproxy/nighthawk-dev:latest
 clientNode: ambient-worker
 serverNode: ambient-worker2
-image: localhost:5000/nighthawk:latest
+# image: localhost:5000/nighthawk:latest

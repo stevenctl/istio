@@ -11,17 +11,59 @@ ztunnel are exercised. The defaults correspond to the integration test setup.
 - `istio-testing-worker2`: servers
 - `istio-testing-control-plane`: waypoints
 
+If you need to rebuild images:
+
+```bash
+export HUB=localhost:5000; export TAG=sandwich-test
+
+cd $ZTUNNEL
+git fetch; git checkout stevenctl/sandwich-bench
+make build
+
+cd $ISTIO
+git fetch; git checkout stevenctl/sandwich-bench
+cp $ZTUNNEL/out/rust/debug/ztunnel $ISTIO/out/linux_amd64/
+cp $ZTUNNEL/out/rust/debug/ztunnel $ISTIO/out/linux_amd64/release
+
+./tools/docker --builder crane --push --targets pilot,proxyv2,install-cni,solo-install-cni,ztunnel
+```
+
+Then setup a cluster and install istio
+
 ```bash
 # from the istio repo root
 export HUB=localhost:5000
 export TAG=sandwich-test # if you change it, make sure to update the sandwich chart
-./prow/integ-suite-kind.sh --manual --kind-config prow/config/ambient-sc.yaml --skip-cleanup
-go run ./istioctl/cmd/istioctl install \
-  -f ~/mc-ambient/iop.yaml --set hub=$HUB --set tag=$TAG \
-  --set values.global.network=$CLUSTER_NAME --set values.global.imagePullPolicy=Always \
-  --manifests manifests/
 
+kind create cluster --config=- <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ambient
+nodes:
+- role: control-plane
+  extraMounts:
+  - hostPath: /tmp/control-plane-ztunnel/
+    containerPath: /var/run/ztunnel/
+- role: worker
+  extraMounts:
+  - hostPath: /tmp/worker1-ztunnel/
+    containerPath: /var/run/ztunnel/
+- role: worker
+  extraMounts:
+  - hostPath: /tmp/worker2-ztunnel/
+    containerPath: /var/run/ztunnel/
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
+    endpoint = ["http://kind-registry:5000"]
+EOF
+
+go run ./istioctl/cmd/istioctl install \
+  -f ambient-perf/iop.yaml --set hub=$HUB --set tag=$TAG \
+  --set values.global.imagePullPolicy=Always \
+  --manifests manifests/
 ```
+
 
 ## Tester Setup
 
@@ -55,22 +97,3 @@ CONNECTIONS=100
 ## NOTE: this multiplies the above
 THREADS=1
 ```
-
-## Sandwich
-
-The "Sandwich" Waypoint is really just a passthrough Envoy (`proxyv2` image, `envoy` executable).
-Config could be modified to add some filters we want to test.
-
-Deploy it with `./install sandwich`. It will be put on a node
-separate from test clients and servers.
-
-Edit the `values.yaml` to include Pod IPs for the target servers.
-By default it will use `LOGICAL_DNS` to headless Service.
-
-To send traffic through it, set `TARGET_HOST`.
-
-```bash
-TARGET_HOST=static-waypoint ./tests/iperf/test.sh
-TARGET_HOST=static-waypoint ./tests/nighthawk/test.sh
-```
-

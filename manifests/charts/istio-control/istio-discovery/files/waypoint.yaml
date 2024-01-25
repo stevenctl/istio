@@ -45,7 +45,6 @@ spec:
           (strdict "istio.io/rev" (.Revision | default "default"))
           (strdict
             "ambient.istio.io/redirection" "enabled"
-            # TODO(sandwich) control this with a flag?
             "prometheus.io/path" "/stats/prometheus"
             "prometheus.io/port" "15020"
             "prometheus.io/scrape" "true"

@@ -719,7 +719,7 @@ type NodeMetadata struct {
 	CloudrunAddr string `json:"CLOUDRUN_ADDR,omitempty"`
 
 	// Sandwich wyaoint proxies don't handle their own mTLS/HBONe
-	Sandwich StringBool `json:SANDWICH,omitempty`
+	Sandwich StringBool `json:"SANDWICH,omitempty"`
 
 	// Metadata discovery service enablement
 	MetadataDiscovery StringBool `json:"METADATA_DISCOVERY,omitempty"`
