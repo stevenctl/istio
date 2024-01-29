@@ -64,10 +64,12 @@ func (lb *ListenerBuilder) buildWaypointInbound() []*listener.Listener {
 	// 3. Encapsulation CONNECT listener, originating the tunnel
 	wls, wps := findWaypointResources(lb.node, lb.push)
 
-	listeners = append(listeners,
-		lb.buildWaypointInboundConnectTerminate(),
-		lb.buildWaypointInternal(wls, wps.orderedServices),
-		buildWaypointConnectOriginateListener())
+	if !lb.node.Metadata.Sandwich {
+		listeners = append(listeners,
+			lb.buildWaypointInboundConnectTerminate(),
+			buildWaypointConnectOriginateListener())
+	}
+	listeners = append(listeners, lb.buildWaypointInternal(wls, wps.orderedServices))
 
 	return listeners
 }
@@ -184,7 +186,7 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 					TargetPort:  uint32(port.Port),
 				},
 				bind:  "0.0.0.0",
-				hbone: true,
+				hbone: lb.node.EnableHBONE(),
 			}
 			name := model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "", svc.Hostname, port.Port)
 			tcpName := name + "-tcp"
@@ -197,6 +199,11 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 			httpChain := &listener.FilterChain{
 				Filters: lb.buildWaypointInboundHTTPFilters(svc, cc, pre, post),
 				Name:    httpName,
+			}
+			// Sandwich prepends the Proxy Protocl TLV filter to extract identity
+			if lb.node.Metadata.Sandwich {
+				tcpChain.Filters = append([]*listener.Filter{xdsfilters.ProxyProtocolTLVAuthorityNetworkFilter}, httpChain.Filters...)
+				httpChain.Filters = append([]*listener.Filter{xdsfilters.ProxyProtocolTLVAuthorityNetworkFilter}, tcpChain.Filters...)
 			}
 			if port.Protocol.IsUnsupported() {
 				// If we need to sniff, insert two chains and the protocol detector
@@ -238,11 +245,15 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 				},
 			},
 			bind:  "0.0.0.0",
-			hbone: true,
+			hbone: lb.node.EnableHBONE(),
+		}
+		authorityFilter := xdsfilters.ConnectAuthorityNetworkFilter
+		if lb.node.Metadata.Sandwich {
+			authorityFilter = xdsfilters.ProxyProtocolTLVAuthorityNetworkFilter
 		}
 		tcpChain := &listener.FilterChain{
 			Filters: append([]*listener.Filter{
-				xdsfilters.ConnectAuthorityNetworkFilter,
+				authorityFilter,
 			},
 				lb.buildInboundNetworkFilters(cc)...),
 			Name: "direct-tcp",
@@ -250,7 +261,7 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 		// TODO: maintains undesirable persistent HTTP connections to "encap"
 		httpChain := &listener.FilterChain{
 			Filters: append([]*listener.Filter{
-				xdsfilters.ConnectAuthorityNetworkFilter,
+				authorityFilter,
 			},
 				lb.buildWaypointInboundHTTPFilters(nil, cc, pre, post)...),
 			Name: "direct-http",
@@ -279,6 +290,7 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 				})
 		}
 	}
+
 	l := &listener.Listener{
 		Name:              MainInternalName,
 		ListenerSpecifier: &listener.Listener_InternalListener{InternalListener: &listener.Listener_InternalListenerConfig{}},
@@ -303,6 +315,22 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []*model.WorkloadInfo, svcs
 			},
 		},
 	}
+
+	if lb.node.Metadata.Sandwich {
+		// Sandwich uses ProxyProtocol (with TLV carrying auth info)
+		// Use that instead of original dst.
+		l.ListenerFilters = []*listener.ListenerFilter{
+			xdsfilters.ProxyProtocolTLV,
+			// TODO: This may affect the data path due to the server-first protocols triggering a time-out. Need exception filter.
+			xdsfilters.HTTPInspector,
+		}
+		// Sandwich binds what is usually an internal listner as an
+
+		actualWildcard, _ := getActualWildcardAndLocalHost(lb.node)
+    l.Address = util.BuildAddress(actualWildcard, model.SandwichInboundListenPort)
+		l.ListenerSpecifier = nil
+	}
+
 	return l
 }
 

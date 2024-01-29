@@ -40,4 +40,5 @@ const (
 
 	// HBoneInboundListenPort is the port on which incoming HBone traffic will be captured.
 	HBoneInboundListenPort = 15008
+	SandwichInboundListenPort = 15088
 )
