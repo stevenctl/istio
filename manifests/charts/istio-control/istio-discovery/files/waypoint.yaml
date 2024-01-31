@@ -52,6 +52,7 @@ spec:
             "prometheus.io/scrape" "true"
           ) | nindent 8 }}
       labels:
+        {{- $TunnelLabel := or (and (not $sandwich) (strdict "networking.istio.io/tunnel" "http")) (strdict) }}
         {{- toJsonMap
           (strdict
             "sidecar.istio.io/inject" "false"
@@ -59,6 +60,7 @@ spec:
             "service.istio.io/canonical-revision" "latest"
            )
           .InfrastructureLabels
+          (valueOrDefault $TunnelLabel (strdict))
           (strdict
             "gateway.networking.k8s.io/gateway-name" .Name
             "istio.io/gateway-name" .Name
