@@ -226,6 +226,10 @@ message GatewayAddress {
   // used for sending unauthenticated traffic originating outside the mesh to a waypoint-enabled destination
   // A value of 0 = unset
   uint32 hbone_single_tls_port = 4;
+  // port to reach the gateway using plaintext PROXY protocol 
+  // used in conjunction with hbone_mtls_port targeting the ztunnel
+  // A value of 0 = unset
+  uint32 proxy_protocol_port = 5;
 }
 
 // NetworkAddress represents an address bound to a specific network.

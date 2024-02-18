@@ -57,6 +57,8 @@ const (
 	// HBONE declares that the port carries HBONE traffic.
 	// This cannot be declared by Services, but is used for some internal code that uses Protocol
 	HBONE Instance = "HBONE"
+  // PROXY declares that the port handles HAProxy PROXY protocol, likely for sandwiched waypoints. 
+	PROXY Instance = "PROXY"
 	// Unsupported - value to signify that the protocol is unsupported.
 	Unsupported Instance = "UnsupportedProtocol"
 )

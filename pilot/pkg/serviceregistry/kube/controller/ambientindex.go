@@ -663,11 +663,14 @@ func (a *AmbientIndexImpl) handleKubeGateway(_, gateway *k8sbeta.Gateway, event 
 	if gateway.Spec.GatewayClassName == constants.WaypointGatewayClassName && len(gateway.Status.Addresses) > 0 {
 		scope := model.WaypointScope{Namespace: gateway.Namespace, ServiceAccount: gateway.Annotations[constants.WaypointServiceAccount]}
 
-		waypointPort := uint32(15008)
+		waypointPort, proxyPort := uint32(15008), uint32(0)
 		for _, l := range gateway.Spec.Listeners {
-			if l.Protocol == k8sbeta.ProtocolType(protocol.HBONE) {
-				waypointPort = uint32(l.Port)
-			}
+      switch protocol.Instance(l.Protocol) {
+        case protocol.HBONE:
+          waypointPort = uint32(l.Port)
+        case protocol.PROXY:
+          proxyPort = uint32(l.Port)
+      }
 		}
 
 		ip, err := netip.ParseAddr(gateway.Status.Addresses[0].Value)
@@ -684,6 +687,7 @@ func (a *AmbientIndexImpl) handleKubeGateway(_, gateway *k8sbeta.Gateway, event 
 				},
 			},
 			HboneMtlsPort: waypointPort,
+      ProxyProtocolPort: proxyPort,
 		}
 
 		updates := sets.New[model.ConfigKey]()

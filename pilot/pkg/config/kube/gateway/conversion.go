@@ -2097,13 +2097,13 @@ func convertGateways(r configContext) ([]config.Config, map[parentKey][]*parentI
 // configure it in an expected way so that we have consistency and can make changes in the future as needed.
 // We could completely reject but that seems more likely to cause pain.
 func unexpectedWaypointListener(l k8s.Listener) bool {
-	if l.Port != 15008 {
-		return true
+	if l.Port == 15008 && l.Protocol == k8s.ProtocolType(protocol.HBONE) {
+		return false
 	}
-	if l.Protocol != k8s.ProtocolType(protocol.HBONE) {
-		return true
+	if l.Port == 15088 && l.Protocol == k8s.ProtocolType(protocol.PROXY) {
+		return false
 	}
-	return false
+	return true
 }
 
 func getListenerNames(obj config.Config) sets.Set[k8s.SectionName] {
@@ -2364,12 +2364,14 @@ func buildListener(r configContext, obj config.Config, l k8s.Listener, listenerI
 		Tls:   tls,
 	}
 	if controllerName == constants.ManagedGatewayMeshController {
+    // the XDS we generate corresponds to what we validate here
 		if unexpectedWaypointListener(l) {
 			listenerConditions[string(k8sv1.ListenerConditionAccepted)].error = &ConfigError{
 				Reason:  string(k8sv1.ListenerReasonUnsupportedProtocol),
-				Message: `Expected a single listener on port 15008 with protocol "HBONE"`,
+				Message: `Listeners must be either 15008 with protocol "HBONE", or 15088 with "PROXY"`,
 			}
 		}
+    // TODO validate that even if we have the PROXY, we still need the HBONE one?
 	}
 
 	reportListenerCondition(listenerIndex, l, obj, listenerConditions)
