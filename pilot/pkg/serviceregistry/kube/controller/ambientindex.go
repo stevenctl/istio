@@ -659,8 +659,12 @@ func (a *AmbientIndexImpl) handleService(svc *v1.Service, ev model.Event, c *Con
 func (a *AmbientIndexImpl) handleKubeGateway(_, gateway *k8sbeta.Gateway, event model.Event, c *Controller) {
 	// gateway.Status.Addresses should only be populated once the Waypoint's deployment has at least 1 ready pod, it should never be removed after going ready
 	// ignore Kubernetes Gateways which aren't waypoints
-	// TODO: should this be WaypointGatewayClass or matches a label?
-	if gateway.Spec.GatewayClassName == constants.WaypointGatewayClassName && len(gateway.Status.Addresses) > 0 {
+
+	// TODO: hack to allow non-istio gateways as waypint
+  _, labeled := gateway.ObjectMeta.Labels["is-waypoint"]
+
+  hasAddr := len(gateway.Status.Addresses) > 0 || len(gateway.Spec.Addresses) > 0
+	if (labeled || gateway.Spec.GatewayClassName == constants.WaypointGatewayClassName) && hasAddr {
 		scope := model.WaypointScope{Namespace: gateway.Namespace, ServiceAccount: gateway.Annotations[constants.WaypointServiceAccount]}
 
 		waypointPort, proxyPort := uint32(15008), uint32(0)
@@ -673,7 +677,14 @@ func (a *AmbientIndexImpl) handleKubeGateway(_, gateway *k8sbeta.Gateway, event 
       }
 		}
 
-		ip, err := netip.ParseAddr(gateway.Status.Addresses[0].Value)
+    // HACK to workaround gw controller not setting VIP into status address 
+    rawIP := "" 
+    if len(gateway.Status.Addresses) > 0 {
+      rawIP = gateway.Status.Addresses[0].Value
+    } else {
+      rawIP = gateway.Spec.Addresses[0].Value
+    }
+		ip, err := netip.ParseAddr(rawIP)
 		if err != nil {
 			// This should be a transient error when upgrading, when the Kube Gateway status is updated it should write an IP address
 			log.Errorf("Unable to parse IP address in status of %v/%v/%v", gvk.KubernetesGateway, gateway.Namespace, gateway.Name)
