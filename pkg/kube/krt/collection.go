@@ -355,7 +355,7 @@ func newManyCollection[I, O any](cc Collection[I], hf TransformationMulti[I, O],
 		handlerReg := c.RegisterBatch(func(events []Event[I]) {
 			if log.DebugEnabled() {
 				h.log.WithLabels("dep", "primary", "batch", len(events)).
-					Debugf("got event")
+					Infof("got event")
 			}
 			h.onPrimaryInputEvent(events)
 		}, true)
