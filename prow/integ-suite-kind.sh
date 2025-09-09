@@ -78,6 +78,10 @@ while (( "$#" )); do
       SKIP_BUILD=true
       shift
     ;;
+    --local-registry)
+      LOCAL_REGISTRY=true
+      shift
+    ;;
     --manual)
       MANUAL=true
       shift
@@ -183,8 +187,11 @@ if [[ -z "${SKIP_SETUP:-}" ]]; then
   fi
 fi
 
-if [[ -z "${SKIP_BUILD:-}" ]]; then
+if [[ -z "$SKIP_BUILD" ]] && [[ -n "$LOCAL_REGISTRY" ]];  then
   trace "setup kind registry" setup_kind_registry
+fi
+
+if [[ -z "${SKIP_BUILD:-}" ]]; then
   trace "build images" build_images "${PARAMS[*]}"
 
   # upload WASM plugins to kind-registry
