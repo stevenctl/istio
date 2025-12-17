@@ -24,7 +24,37 @@ import (
 	"istio.io/istio/pkg/util/sets"
 )
 
-type join[T any] struct {
+func JoinCollection[T any](cs []Collection[T], opts ...CollectionOption) Collection[T] {
+	// TODO: implement a common constuctor
+}
+
+// nolint: unused // (not true)
+// joinIndexer will do a lookup across multiple sub-indexers.
+// shareable across checked and unchecked implementations.
+type joinIndexer[T any] struct {
+	indexers []indexer[T]
+}
+
+// nolint: unused // (not true)
+func (j joinIndexer[T]) Lookup(key string) []T {
+	var res []T
+	first := true
+	for _, i := range j.indexers {
+		l := i.Lookup(key)
+		if len(l) > 0 && first {
+			// Optimization: re-use the first returned slice
+			res = l
+			first = false
+		} else {
+			res = append(res, l...)
+		}
+	}
+	return res
+}
+
+// checkedJoin is a Collection that joins multiple sub-collections with conflict resolution.
+// This is safe to use when you can't guarantee that the sub-collections have disjoint key sets.
+type checkedJoin[T any] struct {
 	collectionName   string
 	id               collectionUID
 	collections      []internalCollection[T]
@@ -45,7 +75,7 @@ type join[T any] struct {
 	stop <-chan struct{}
 }
 
-func (j *join[T]) GetKey(k string) *T {
+func (j *checkedJoin[T]) GetKey(k string) *T {
 	for _, c := range j.collections {
 		if r := c.GetKey(k); r != nil {
 			return r
@@ -54,7 +84,7 @@ func (j *join[T]) GetKey(k string) *T {
 	return nil
 }
 
-func (j *join[T]) List() []T {
+func (j *checkedJoin[T]) List() []T {
 	var res []T
 	if j.uncheckedOverlap {
 		first := true
@@ -97,11 +127,11 @@ func (j *join[T]) List() []T {
 	return res
 }
 
-func (j *join[T]) Register(f func(o Event[T])) HandlerRegistration {
+func (j *checkedJoin[T]) Register(f func(o Event[T])) HandlerRegistration {
 	return registerHandlerAsBatched[T](j, f)
 }
 
-func (j *join[T]) RegisterBatch(f func(o []Event[T]), runExistingState bool) HandlerRegistration {
+func (j *checkedJoin[T]) RegisterBatch(f func(o []Event[T]), runExistingState bool) HandlerRegistration {
 	// Fast path for unchecked overlap: use List() directly without locking or tracking processedState
 	if j.uncheckedOverlap {
 		var initialEvents []Event[T]
@@ -142,7 +172,7 @@ func (j *join[T]) RegisterBatch(f func(o []Event[T]), runExistingState bool) Han
 
 // handleSubCollectionEvents processes events from a sub-collection, refreshing them
 // based on the current state of all collections, then distributes to registered handlers.
-func (j *join[T]) handleSubCollectionEvents(events []Event[T], sourceCollectionIdx int) {
+func (j *checkedJoin[T]) handleSubCollectionEvents(events []Event[T], sourceCollectionIdx int) {
 	// Fast path for unchecked overlap: no conflict resolution, no state tracking, no locking
 	if j.uncheckedOverlap {
 		j.eventHandlers.Distribute(events, !j.HasSynced())
@@ -173,7 +203,7 @@ func (j *join[T]) handleSubCollectionEvents(events []Event[T], sourceCollectionI
 	j.eventHandlers.Distribute(refreshedEvents, !j.HasSynced())
 }
 
-func (j *join[T]) getFromColIdx(idx int, key string) *T {
+func (j *checkedJoin[T]) getFromColIdx(idx int, key string) *T {
 	if idx < 0 || idx >= len(j.collections) {
 		if EnableAssertions {
 			panic("join: getFromColIdx: index out of range:" + fmt.Sprint(idx) + " len: " + fmt.Sprint(len(j.collections)))
@@ -199,7 +229,7 @@ func (j *join[T]) getFromColIdx(idx int, key string) *T {
 // refreshEvents refreshes events by checking the current state of all collections
 // to determine which collection is authoritative for each key. This implements
 // conflict resolution without storing objects.
-func (j *join[T]) refreshEvents(events []Event[T], sourceCollectionIdx int) []Event[T] {
+func (j *checkedJoin[T]) refreshEvents(events []Event[T], sourceCollectionIdx int) []Event[T] {
 	var result []Event[T]
 
 	for _, ev := range events {
@@ -276,48 +306,26 @@ func (j *join[T]) refreshEvents(events []Event[T], sourceCollectionIdx int) []Ev
 }
 
 // nolint: unused // (not true, its to implement an interface)
-func (j *join[T]) augment(a any) any {
+func (j *checkedJoin[T]) augment(a any) any {
 	// not supported in this collection type
 	return a
 }
 
 // nolint: unused // (not true, its to implement an interface)
-func (j *join[T]) name() string { return j.collectionName }
+func (j *checkedJoin[T]) name() string { return j.collectionName }
 
 // nolint: unused // (not true, its to implement an interface)
-func (j *join[T]) uid() collectionUID { return j.id }
+func (j *checkedJoin[T]) uid() collectionUID { return j.id }
 
 // nolint: unused // (not true, its to implement an interface)
-func (j *join[I]) dump() CollectionDump {
+func (j *checkedJoin[I]) dump() CollectionDump {
 	// Dump should not be used on join; instead its preferred to enroll each individual collection. Maybe reconsider
 	// in the future if there is a need
 	return CollectionDump{}
 }
 
-// nolint: unused // (not true)
-type joinIndexer[T any] struct {
-	indexers []indexer[T]
-}
-
-// nolint: unused // (not true)
-func (j joinIndexer[T]) Lookup(key string) []T {
-	var res []T
-	first := true
-	for _, i := range j.indexers {
-		l := i.Lookup(key)
-		if len(l) > 0 && first {
-			// Optimization: re-use the first returned slice
-			res = l
-			first = false
-		} else {
-			res = append(res, l...)
-		}
-	}
-	return res
-}
-
 // nolint: unused // (not true, its to implement an interface)
-func (j *join[T]) index(name string, extract func(o T) []string) indexer[T] {
+func (j *checkedJoin[T]) index(name string, extract func(o T) []string) indexer[T] {
 	ji := joinIndexer[T]{indexers: make([]indexer[T], 0, len(j.collections))}
 	for _, c := range j.collections {
 		ji.indexers = append(ji.indexers, c.index(name, extract))
@@ -325,29 +333,29 @@ func (j *join[T]) index(name string, extract func(o T) []string) indexer[T] {
 	return ji
 }
 
-func (j *join[T]) Synced() Syncer {
+func (j *checkedJoin[T]) Synced() Syncer {
 	return channelSyncer{
 		name:   j.collectionName,
 		synced: j.synced,
 	}
 }
 
-func (j *join[T]) HasSynced() bool {
+func (j *checkedJoin[T]) HasSynced() bool {
 	return j.syncer.HasSynced()
 }
 
-func (j *join[T]) WaitUntilSynced(stop <-chan struct{}) bool {
+func (j *checkedJoin[T]) WaitUntilSynced(stop <-chan struct{}) bool {
 	return j.syncer.WaitUntilSynced(stop)
 }
 
-func (j *join[T]) Metadata() Metadata {
+func (j *checkedJoin[T]) Metadata() Metadata {
 	return j.metadata
 }
 
-// JoinCollection combines multiple Collection[T] into a single
+// CheckedJoinCollection combines multiple Collection[T] into a single
 // Collection[T]. Key conflicts are resolved by picking the item
 // produced by the first collections in the list of input collections.
-func JoinCollection[T any](cs []Collection[T], opts ...CollectionOption) Collection[T] {
+func CheckedJoinCollection[T any](cs []Collection[T], opts ...CollectionOption) Collection[T] {
 	o := buildCollectionOptions(opts...)
 	if o.name == "" {
 		o.name = fmt.Sprintf("Join[%v]", ptr.TypeName[T]())
@@ -368,7 +376,7 @@ func JoinCollection[T any](cs []Collection[T], opts ...CollectionOption) Collect
 	if o.stop == nil {
 		panic("no stop channel")
 	}
-	j := &join[T]{
+	j := &checkedJoin[T]{
 		collectionName:   o.name,
 		id:               nextUID(),
 		synced:           synced,
@@ -407,6 +415,186 @@ func JoinCollection[T any](cs []Collection[T], opts ...CollectionOption) Collect
 			reg.UnregisterHandler()
 		}
 	}()
+
+	return j
+}
+
+type uncheckedJoin[T any] struct {
+	collectionName   string
+	id               collectionUID
+	collections      []internalCollection[T]
+	synced           <-chan struct{}
+	uncheckedOverlap bool
+	syncer           Syncer
+	metadata         Metadata
+}
+
+func (j *uncheckedJoin[T]) GetKey(k string) *T {
+	for _, c := range j.collections {
+		if r := c.GetKey(k); r != nil {
+			return r
+		}
+	}
+	return nil
+}
+
+func (j *uncheckedJoin[T]) List() []T {
+	var res []T
+	if j.uncheckedOverlap {
+		first := true
+		for _, c := range j.collections {
+			objs := c.List()
+			// As an optimization, take the first (non-empty) result as-is without copying
+			if len(objs) > 0 && first {
+				res = objs
+				first = false
+			} else {
+				// After the first, safely merge into the result
+				res = append(res, objs...)
+			}
+		}
+		return res
+	}
+	var found sets.String
+	first := true
+	for _, c := range j.collections {
+		objs := c.List()
+		// As an optimization, take the first (non-empty) result as-is without copying
+		if len(objs) > 0 && first {
+			res = objs
+			first = false
+			found = sets.NewWithLength[string](len(objs))
+			for _, i := range objs {
+				found.Insert(GetKey(i))
+			}
+		} else {
+			// After the first, safely merge into the result
+			for _, i := range objs {
+				key := GetKey(i)
+				if !found.InsertContains(key) {
+					// Only keep it if it is the first time we saw it, as our merging mechanism is to keep the first one
+					res = append(res, i)
+				}
+			}
+		}
+	}
+	return res
+}
+
+func (j *uncheckedJoin[T]) Register(f func(o Event[T])) HandlerRegistration {
+	return registerHandlerAsBatched[T](j, f)
+}
+
+func (j *uncheckedJoin[T]) RegisterBatch(f func(o []Event[T]), runExistingState bool) HandlerRegistration {
+	sync := multiSyncer{}
+	removes := []func(){}
+	for _, c := range j.collections {
+		reg := c.RegisterBatch(f, runExistingState)
+		removes = append(removes, reg.UnregisterHandler)
+		sync.syncers = append(sync.syncers, reg)
+	}
+	return joinHandlerRegistration{
+		Syncer:  sync,
+		removes: removes,
+	}
+}
+
+type joinHandlerRegistration struct {
+	Syncer
+	removes []func()
+}
+
+func (j joinHandlerRegistration) UnregisterHandler() {
+	for _, remover := range j.removes {
+		remover()
+	}
+}
+
+// nolint: unused // (not true, its to implement an interface)
+func (j *uncheckedJoin[T]) augment(a any) any {
+	// not supported in this collection type
+	return a
+}
+
+// nolint: unused // (not true, its to implement an interface)
+func (j *uncheckedJoin[T]) name() string { return j.collectionName }
+
+// nolint: unused // (not true, its to implement an interface)
+func (j *uncheckedJoin[T]) uid() collectionUID { return j.id }
+
+// nolint: unused // (not true, its to implement an interface)
+func (j *uncheckedJoin[I]) dump() CollectionDump {
+	// Dump should not be used on join; instead its preferred to enroll each individual collection. Maybe reconsider
+	// in the future if there is a need
+	return CollectionDump{}
+}
+
+// nolint: unused // (not true, its to implement an interface)
+func (j *uncheckedJoin[T]) index(name string, extract func(o T) []string) indexer[T] {
+	ji := joinIndexer[T]{indexers: make([]indexer[T], 0, len(j.collections))}
+	for _, c := range j.collections {
+		ji.indexers = append(ji.indexers, c.index(name, extract))
+	}
+	return ji
+}
+
+func (j *uncheckedJoin[T]) Synced() Syncer {
+	return channelSyncer{
+		name:   j.collectionName,
+		synced: j.synced,
+	}
+}
+
+func (j *uncheckedJoin[T]) HasSynced() bool {
+	return j.syncer.HasSynced()
+}
+
+func (j *uncheckedJoin[T]) WaitUntilSynced(stop <-chan struct{}) bool {
+	return j.syncer.WaitUntilSynced(stop)
+}
+
+func (j *uncheckedJoin[T]) Metadata() Metadata {
+	return j.metadata
+}
+
+// UncheckedJoinCollection combines multiple Collection[T] into a single collection.
+// This assumes that the input collections have disjoint key sets; if there are
+// key conflicts, the first collection in the list takes precedence, but events
+// may misleading when keys overlap.
+func UncheckedJoinCollection[T any](cs []Collection[T], opts ...CollectionOption) Collection[T] {
+	o := buildCollectionOptions(opts...)
+	if o.name == "" {
+		o.name = fmt.Sprintf("Join[%v]", ptr.TypeName[T]())
+	}
+	synced := make(chan struct{})
+	c := slices.Map(cs, func(e Collection[T]) internalCollection[T] {
+		return e.(internalCollection[T])
+	})
+	go func() {
+		for _, c := range c {
+			if !c.WaitUntilSynced(o.stop) {
+				return
+			}
+		}
+		close(synced)
+		log.Infof("%v synced", o.name)
+	}()
+	// TODO: in the future, we could have a custom merge function. For now, since we just take the first, we optimize around that case
+	j := &uncheckedJoin[T]{
+		collectionName:   o.name,
+		id:               nextUID(),
+		synced:           synced,
+		collections:      c,
+		uncheckedOverlap: o.joinUnchecked,
+		syncer: channelSyncer{
+			name:   o.name,
+			synced: synced,
+		},
+	}
+
+	if o.metadata != nil {
+		j.metadata = o.metadata
+	}
 
 	return j
 }
