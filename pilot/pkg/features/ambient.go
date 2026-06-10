@@ -86,6 +86,11 @@ var (
 		false,
 		"If enabled, selector based authorization policies will be enforced as L4 policies in front of the waypoint.").Get()
 
+	ScopedAddressPushes = registerAmbient("AMBIENT_SCOPED_ADDRESS_PUSHES", true, true,
+		"If enabled, ambient Address updates only trigger pushes for waypoints whose attached services or workloads changed, "+
+			"and are skipped entirely for sidecar and gateway proxies. If disabled, every Address update triggers a "+
+			"full LDS/CDS/EDS push to all waypoints and an RDS push to all proxies.")
+
 	EnableWdsDryRunAuthzPol = registerAmbient("AMBIENT_ENABLE_DRY_RUN_AUTHORIZATION_POLICY", false, false,
 		"If enabled, ztunnel will be configured with dry-run authorizationPolicies. "+
 			"Ensure ztunnel is 1.29 or above before enabling this feature. "+
