@@ -17,7 +17,6 @@ package xds
 import (
 	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 
-	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/core"
 	"istio.io/istio/pilot/pkg/util/protoconv"
@@ -38,32 +37,27 @@ type NdsGenerator struct {
 var _ model.XdsResourceGenerator = &NdsGenerator{}
 
 // Map of all configs that do not impact NDS
-var skippedNdsConfigs = func() sets.Set[kind.Kind] {
-	s := sets.New(
-		kind.Gateway,
-		kind.VirtualService,
-		kind.DestinationRule,
-		kind.Secret,
-		kind.Telemetry,
-		kind.EnvoyFilter,
-		kind.WorkloadEntry,
-		kind.WorkloadGroup,
-		kind.AuthorizationPolicy,
-		kind.RequestAuthentication,
-		kind.PeerAuthentication,
-		kind.WasmPlugin,
-		kind.TrafficExtension,
-		kind.ProxyConfig,
-		kind.MeshConfig,
-		kind.Endpoints,
-	)
-	if features.ScopedAddressPushes {
-		// The DNS name table is derived from services; ambient Address changes that matter
-		// to it arrive as ServiceEntry updates.
-		s.Insert(kind.Address)
-	}
-	return s
-}()
+var skippedNdsConfigs = sets.New(
+	kind.Gateway,
+	kind.VirtualService,
+	kind.DestinationRule,
+	kind.Secret,
+	kind.Telemetry,
+	kind.EnvoyFilter,
+	kind.WorkloadEntry,
+	kind.WorkloadGroup,
+	kind.AuthorizationPolicy,
+	kind.RequestAuthentication,
+	kind.PeerAuthentication,
+	kind.WasmPlugin,
+	kind.TrafficExtension,
+	kind.ProxyConfig,
+	kind.MeshConfig,
+	kind.Endpoints,
+	// The DNS name table is derived from services; ambient Address changes that matter
+	// to it arrive as ServiceEntry updates.
+	kind.Address,
+)
 
 func ndsNeedsPush(req *model.PushRequest, proxy *model.Proxy) bool {
 	if res, ok := xdsNeedsPush(req, proxy); ok {

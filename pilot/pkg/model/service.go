@@ -1091,8 +1091,6 @@ func (ref WaypointReference) Matches(key WaypointKey) bool {
 	return ref.Network == key.Network && slices.Contains(key.Addresses, ref.Address)
 }
 
-var _ AmbientIndexes = NoopAmbientIndexes{}
-
 // NoopAmbientIndexes provides an implementation of AmbientIndexes that always returns nil, to easily "skip" it.
 type NoopAmbientIndexes struct{}
 

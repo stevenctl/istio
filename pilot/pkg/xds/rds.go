@@ -15,7 +15,6 @@
 package xds
 
 import (
-	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/core"
 	"istio.io/istio/pkg/config/schema/kind"
@@ -29,28 +28,23 @@ type RdsGenerator struct {
 var _ model.XdsResourceGenerator = &RdsGenerator{}
 
 // Map of all configs that do not impact RDS
-var skippedRdsConfigs = func() sets.Set[kind.Kind] {
-	s := sets.New(
-		kind.WorkloadEntry,
-		kind.WorkloadGroup,
-		kind.AuthorizationPolicy,
-		kind.RequestAuthentication,
-		kind.PeerAuthentication,
-		kind.Secret,
-		kind.WasmPlugin,
-		kind.TrafficExtension,
-		kind.Telemetry,
-		kind.ProxyConfig,
-		kind.DNSName,
-		kind.Endpoints,
-	)
-	if features.ScopedAddressPushes {
-		// Sidecar and gateway routes don't depend on ambient Address data; service changes that
-		// affect them arrive as ServiceEntry/Endpoints updates. Waypoints are handled in rdsNeedsPush.
-		s.Insert(kind.Address)
-	}
-	return s
-}()
+var skippedRdsConfigs = sets.New(
+	kind.WorkloadEntry,
+	kind.WorkloadGroup,
+	kind.AuthorizationPolicy,
+	kind.RequestAuthentication,
+	kind.PeerAuthentication,
+	kind.Secret,
+	kind.WasmPlugin,
+	kind.TrafficExtension,
+	kind.Telemetry,
+	kind.ProxyConfig,
+	kind.DNSName,
+	kind.Endpoints,
+	// Sidecar and gateway routes don't depend on ambient Address data; service changes that
+	// affect them arrive as ServiceEntry/Endpoints updates. Waypoints are handled in rdsNeedsPush.
+	kind.Address,
+)
 
 func rdsNeedsPush(req *model.PushRequest, proxy *model.Proxy) bool {
 	if res, ok := xdsNeedsPush(req, proxy); ok {

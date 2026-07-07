@@ -870,8 +870,14 @@ func PushXdsAddress[T any](xds model.XDSUpdater, f func(T) string, waypointRef f
 				if c != "" {
 					au.Insert(c)
 				}
-				if ref, ok := model.WaypointReferenceFromGatewayAddress(waypointRef(i)); ok {
-					wu.Insert(ref)
+				if refAddr := waypointRef(i); refAddr != nil {
+					if ref, ok := model.WaypointReferenceFromGatewayAddress(refAddr); ok {
+						wu.Insert(ref)
+					} else {
+						// waypointNeedsPush skips waypoints not in WaypointsUpdated, so an
+						// unresolvable reference means a waypoint may miss this update.
+						log.Warnf("unresolvable waypoint reference %v on %v", refAddr, c)
+					}
 				}
 			}
 		}

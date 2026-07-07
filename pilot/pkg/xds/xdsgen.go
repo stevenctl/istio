@@ -234,16 +234,15 @@ func waypointNeedsPush(req *model.PushRequest, proxy *model.Proxy) bool {
 	}
 	if proxy.IsAmbientEastWestGateway() {
 		// East-west gateways serve the global services on their network rather than attached
-		// services, so attachment-based scoping does not apply to them. This holds regardless of
-		// the ScopedAddressPushes feature.
-		return true
-	}
-	if !features.ScopedAddressPushes {
+		// services, so attachment-based scoping does not apply to them.
 		return true
 	}
 	// Only push if one of the updated services/workloads is attached to this waypoint.
 	// Detachments are covered as well: the ambient index records the waypoints referenced by
 	// both the old and the new state of every updated object.
+	if len(req.WaypointsUpdated) == 0 {
+		return false
+	}
 	key := model.WaypointKeyForProxy(proxy)
 	for ref := range req.WaypointsUpdated {
 		if ref.Matches(key) {

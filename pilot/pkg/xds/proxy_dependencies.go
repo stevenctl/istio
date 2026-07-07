@@ -78,11 +78,10 @@ func proxyDependentOnConfig(proxy *model.Proxy, config model.ConfigKey, push *mo
 	if UnAffectedConfigKinds[proxy.Type].Contains(config.Kind) {
 		return false
 	}
-	// Ambient Address updates only matter to proxies subscribed to Workload Address resources;
-	// anything sidecars and gateways need from those changes is surfaced as ServiceEntry or
-	// Endpoints updates.
-	if features.ScopedAddressPushes && config.Kind == kind.Address {
-		return proxy.GetWatchedResource(v3.AddressType) != nil
+	if config.Kind == kind.Address {
+		// Only proxies with an on-demand WDS subscription (WorkloadType) consume Address updates
+		// here; ztunnel and waypoints are scoped earlier, in DefaultProxyNeedsPush.
+		return proxy.GetWatchedResource(v3.WorkloadType) != nil
 	}
 	// Detailed config dependencies check.
 	switch proxy.Type {

@@ -73,14 +73,21 @@ func TestProxyNeedsPush(t *testing.T) {
 		Metadata:        &model.NodeMetadata{Namespace: nsName},
 		Labels:          map[string]string{"gateway": "gateway"},
 	}
-	// A sidecar-type proxy subscribed to Workload Address resources (e.g. WDS on-demand clients)
-	// must keep receiving Address pushes.
+	// An AddressType subscription does not grant Address pushes here: ztunnel (the only
+	// AddressType subscriber) is scoped earlier, in DefaultProxyNeedsPush.
 	workloadClient := &model.Proxy{
 		Type: model.SidecarProxy, IPAddresses: []string{"127.0.0.2"}, Metadata: &model.NodeMetadata{},
 		SidecarScope:     &model.SidecarScope{Name: generalName, Namespace: nsName},
 		WatchedResources: map[string]*model.WatchedResource{},
 	}
 	workloadClient.NewWatchedResource(v3.AddressType, nil)
+	// A sidecar using on-demand WDS (WorkloadType) must keep receiving Address pushes.
+	mxClient := &model.Proxy{
+		Type: model.SidecarProxy, IPAddresses: []string{"127.0.0.3"}, Metadata: &model.NodeMetadata{},
+		SidecarScope:     &model.SidecarScope{Name: generalName, Namespace: nsName},
+		WatchedResources: map[string]*model.WatchedResource{},
+	}
+	mxClient.NewWatchedResource(v3.WorkloadType, nil)
 
 	sidecarScopeKindNames := map[kind.Kind]string{
 		kind.ServiceEntry: svcName, kind.VirtualService: vsName, kind.DestinationRule: drName, kind.Sidecar: scName,
@@ -172,7 +179,14 @@ func TestProxyNeedsPush(t *testing.T) {
 			sets.New[model.ConfigKey](),
 		},
 		{
-			"address config for workload-subscribed sidecar", workloadClient,
+			"address config for AddressType-watching sidecar", workloadClient,
+			sets.New(model.ConfigKey{Kind: kind.Address, Name: "Kubernetes//Pod/default/app"}),
+			false,
+			false,
+			sets.New[model.ConfigKey](),
+		},
+		{
+			"address config for metadata-exchange WDS sidecar", mxClient,
 			sets.New(model.ConfigKey{Kind: kind.Address, Name: "Kubernetes//Pod/default/app"}),
 			false,
 			true,
@@ -673,9 +687,4 @@ func TestWaypointNeedsPush(t *testing.T) {
 			assert.Equal(t, waypointNeedsPush(tt.req, tt.proxy), tt.want)
 		})
 	}
-
-	t.Run("scoping disabled", func(t *testing.T) {
-		test.SetForTest(t, &features.ScopedAddressPushes, false)
-		assert.Equal(t, waypointNeedsPush(addressUpdate(), waypoint), true)
-	})
 }
