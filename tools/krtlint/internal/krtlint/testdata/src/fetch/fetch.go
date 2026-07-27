@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"istio.io/istio/pkg/kube/krt"
+	"istio.io/istio/pkg/log"
 )
 
 type Input struct{ krt.Named }
@@ -59,6 +60,16 @@ func nondeterministic(inputs krt.Collection[Input]) {
 // Helpers that take a HandlerContext are transformations too, wherever they are declared.
 func helper(ctx krt.HandlerContext, others krt.Collection[Output]) []Output {
 	return others.List() // want `Collection\.List, which does not register a dependency`
+}
+
+// A read that only feeds a log message is not a dependency.
+func logged(inputs krt.Collection[Input], others krt.Collection[Output]) {
+	krt.NewCollection(inputs, func(ctx krt.HandlerContext, i Input) *Output {
+		if krt.FetchOne(ctx, others, krt.FilterKey(i.Name)) == nil {
+			log.Warnf("not found among %v", others.List())
+		}
+		return nil
+	})
 }
 
 // Code outside a transformation may read collections directly.

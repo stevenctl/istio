@@ -103,10 +103,37 @@ func checkTransformationBody(pass *analysis.Pass, body *ast.BlockStmt) {
 		if !ok {
 			return true
 		}
+		// A value that only reaches a log message does not affect the transformation's
+		// output, so it needs no dependency.
+		if isLoggingCall(pass.TypesInfo, call) {
+			return false
+		}
 		checkUntrackedRead(pass, call)
 		checkNondeterminism(pass, call)
 		return true
 	})
+}
+
+// logPkgPath is istio's logging package; both its package-level functions and the methods
+// of its Scope type are treated as logging calls.
+const logPkgPath = "istio.io/istio/pkg/log"
+
+// isLoggingCall reports whether call emits a log message.
+func isLoggingCall(info *types.Info, call *ast.CallExpr) bool {
+	var id *ast.Ident
+	switch fn := ast.Unparen(call.Fun).(type) {
+	case *ast.SelectorExpr:
+		id = fn.Sel
+	case *ast.Ident:
+		id = fn
+	default:
+		return false
+	}
+	obj, ok := info.Uses[id].(*types.Func)
+	if !ok || obj.Pkg() == nil {
+		return false
+	}
+	return obj.Pkg().Path() == logPkgPath
 }
 
 // checkUntrackedRead reports reads of a collection that bypass Fetch and so do not
