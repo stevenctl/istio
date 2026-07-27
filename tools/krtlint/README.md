@@ -39,20 +39,38 @@ It also catches the subtler case of a defined string type: `krt.GetKey` matches
 
 `krt.Equal` decides whether an object changed. It dispatches to an `Equals` method when the
 value or its address satisfies `Equaler[T]` or `Equaler[*T]`, and otherwise falls back to
-`proto.Equal` or `reflect.DeepEqual`. This reports element types where that fallback is
-unsafe:
+`proto.Equal` or `reflect.DeepEqual`. Two kinds of thing are reported, and they differ in
+where the fix belongs.
+
+**Defects in the type declaration**, reported once per package because one fix serves every
+collection built on the type:
 
 - An `Equals` method krt **cannot dispatch to**, because its parameter is neither `T` nor
   `*T`. This is the worst case: the author believes comparison is handled, and krt silently
   uses `reflect.DeepEqual` instead. Declaring `Equals(T)` on a collection of `*T` is the
   usual way in.
-- Types reaching a **protobuf message** through their fields. `reflect.DeepEqual` compares
-  the unexported bookkeeping state protobuf messages carry, so it is not a reliable answer;
-  krt's own code notes that "DeepEqual on proto is broken".
 - Types embedding a protobuf message, which krt detects at runtime and **panics** on.
-- Types with **func** fields, which `reflect.DeepEqual` reports as unequal unless both are
-  nil, so every object looks changed on every recomputation.
-- Types with **synchronization primitives**, whose lock state is compared as data.
+
+**Fields the `reflect.DeepEqual` fallback cannot compare**, reported at every construction
+site, because whether it costs anything depends on the collection rather than the type — a
+transformation passing an object straight through compares the same pointer, one building a
+fresh object every time does not, and a collection that is never written to compares nothing
+at all:
+
+- A reachable **protobuf message**. `reflect.DeepEqual` reads the unexported state protobuf
+  messages carry, which marshaling writes in place, so two equal objects can compare unequal;
+  krt's own code notes that "DeepEqual on proto is broken".
+- **func** fields, which `reflect.DeepEqual` reports as unequal unless both are nil, so every
+  object looks changed on every recomputation.
+- **synchronization primitives**, whose lock state is compared as data.
+
+These all err in the same direction: a genuine difference is still caught, so the cost is
+recomputation that changes nothing rather than a change that never propagates. That is why a
+site which provably never compares anything can reasonably carry a `//krtlint:ignore` — and
+why it is still worth reporting, since only the author knows that.
+
+Where the element type comes from another package, as Kubernetes CRDs do, the report says so:
+Go will not let you declare `Equals` there, so the fix is a wrapper type or the opt-out.
 
 ### `krtequalsfields`
 

@@ -96,8 +96,28 @@ func good(c krt.Collection[Input]) {
 func bad(c krt.Collection[Input]) {
 	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WrongParam { return nil })    // want `declares Equals\(o any\) bool, but krt\.Equal cannot dispatch to it`
 	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) **ValueEquals { return nil })  // want `cannot dispatch to it`
-	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithProto { return nil })     // want `unreliable for protobuf messages \(field Inner\.Address\)`
-	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithFunc { return nil })      // want `unreliable for func values \(field OnChange\)`
-	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithMutex { return nil })     // want `unreliable for synchronization primitives \(field mu\)`
+	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithProto { return nil })     // want `Field Inner\.Address reaches a protobuf message.*Implement .Equals\(equal\.WithProto\) bool.`
+	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithFunc { return nil })      // want `Field OnChange is a func value`
+	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithMutex { return nil })     // want `Field mu holds a synchronization primitive`
 	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *EmbeddedProto { return nil }) // want `embeds a protobuf message`
+}
+
+// Whether an unguarded protobuf costs anything depends on the collection, so every
+// construction site is reported and can be judged on its own.
+func badAgain(c krt.Collection[Input]) {
+	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithProto { return nil }) // want `Field Inner\.Address reaches a protobuf message`
+	krt.NewStaticCollection[*WithProto](nil, nil)                                         // want `Field Inner\.Address reaches a protobuf message`
+	//krtlint:ignore krtequal -- placeholder, never written to
+	krt.NewStaticCollection[*WithProto](nil, nil)
+}
+
+// A defect in the type declaration is reported once, not once per collection built on it.
+func declaredDefectOnlyOnce(c krt.Collection[Input]) {
+	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WrongParam { return nil })
+	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *EmbeddedProto { return nil })
+}
+
+// Foreign is declared outside the package under analysis, so Equals cannot be added to it.
+func foreign(c krt.Collection[Input]) {
+	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *pb.Wrapper { return nil }) // want `Equals cannot be declared on a type from another package`
 }

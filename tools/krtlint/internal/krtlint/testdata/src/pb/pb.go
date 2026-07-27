@@ -27,3 +27,10 @@ type Address struct {
 func (a *Address) ProtoReflect() Message { return nil }
 
 func (a *Address) isMessage() {}
+
+// Wrapper stands in for a generated Kubernetes type: not a message itself, but holding one in
+// a Spec field, and declared somewhere its consumers cannot add methods to it.
+type Wrapper struct {
+	Name string
+	Spec Address
+}
