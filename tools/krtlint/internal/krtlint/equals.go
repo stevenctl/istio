@@ -15,6 +15,7 @@
 package krtlint
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -32,10 +33,19 @@ var EqualAnalyzer = &analysis.Analyzer{
 
 krt decides whether an object changed with krt.Equal, which dispatches to an Equals
 method if one is present and otherwise falls back to proto.Equal or reflect.DeepEqual.
-reflect.DeepEqual is wrong for protobuf messages (which carry unexported internal state)
-and for func fields (never equal unless both are nil), so a type that reaches the
-fallback with such fields either panics or silently reports every object as changed,
-producing an endless recomputation loop.`,
+
+Two things are reported. An Equals method krt cannot dispatch to, or an embedded protobuf
+message, is a defect in the type declaration: the first is silently ignored in favour of
+reflect.DeepEqual, the second panics. Each is reported once, since one fix serves every
+collection built on that type.
+
+Reaching the reflect.DeepEqual fallback with a protobuf, func or lock field is reported at
+every construction site instead, because whether it costs anything depends on the
+collection rather than the type: a transformation that passes an object straight through
+compares the same pointer, while one that builds a fresh object every time does not. These
+err towards reporting a change that did not happen, so the cost is recomputation rather
+than data that never updates, and a collection that provably never compares anything can
+carry an opt-out.`,
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 	Run:      runEqual,
 }
@@ -45,33 +55,39 @@ const maxDepth = 8
 
 func runEqual(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
-	// A type may back many collections; report each distinct problem once per package.
-	seen := map[string]bool{}
+	// A defect in the type declaration is reported once per package: one fix serves every
+	// collection built on the type, so repeating it per construction site would only
+	// multiply the same remedy. Whether an unguarded field actually costs anything is a
+	// property of the collection rather than the type, so those are reported at every site,
+	// each one its own judgment call and its own opt-out.
+	declaredDefect := map[string]bool{}
 	for call := range insp.PreorderSeq((*ast.CallExpr)(nil)) {
 		call := call.(*ast.CallExpr)
 		elem, ok := constructedElem(pass.TypesInfo, call)
 		if !ok || IsTypeParam(elem) {
 			continue
 		}
-		if seen[TypeName(elem)] {
-			continue
-		}
-		seen[TypeName(elem)] = true
-		checkEquality(pass, call.Pos(), elem)
+		checkEquality(pass, call.Pos(), elem, declaredDefect)
 	}
 	return nil, nil
 }
 
-func checkEquality(pass *analysis.Pass, pos token.Pos, elem types.Type) {
+func checkEquality(pass *analysis.Pass, pos token.Pos, elem types.Type, declaredDefect map[string]bool) {
 	name := TypeName(elem)
+	once := func(format string, args ...any) {
+		if declaredDefect[name] {
+			return
+		}
+		declaredDefect[name] = true
+		pass.Reportf(pos, format, args...)
+	}
 
 	// An Equals method that krt cannot dispatch to is worse than none at all: the author
 	// believes comparison is handled, but krt silently uses reflect.DeepEqual.
 	if EqualsMethod(elem) == nil {
 		if declared := DeclaredEquals(elem); declared != nil {
-			pass.Reportf(pos,
-				"krt collection element type %s declares %s, but krt.Equal cannot dispatch to it: "+
-					"the parameter must be exactly %s or *%s. krt will silently fall back to reflect.DeepEqual",
+			once("krt collection element type %s declares %s, but krt.Equal cannot dispatch to it: "+
+				"the parameter must be exactly %s or *%s. krt will silently fall back to reflect.DeepEqual",
 				name, signatureOf(declared), name, name)
 			return
 		}
@@ -83,10 +99,8 @@ func checkEquality(pass *analysis.Pass, pos token.Pos, elem types.Type) {
 	// A type that promotes ProtoReflect from an embedded message is not itself a message.
 	// krt.Equal detects this at runtime and panics rather than risk a wrong answer.
 	if embedsProto(elem) {
-		pass.Reportf(pos,
-			"krt collection element type %s embeds a protobuf message; krt.Equal panics on this "+
-				"rather than compare it incorrectly. Implement `Equals(%s) bool`",
-			name, name)
+		once("krt collection element type %s embeds a protobuf message; krt.Equal panics on this "+
+			"rather than compare it incorrectly. Implement `Equals(%s) bool`", name, name)
 		return
 	}
 	if IsProtoMessage(elem) {
@@ -94,12 +108,41 @@ func checkEquality(pass *analysis.Pass, pos token.Pos, elem types.Type) {
 		return
 	}
 
+	remedy := remedyFor(pass, elem, name)
 	for _, h := range equalityHazards(elem) {
 		pass.Reportf(pos,
 			"krt collection element type %s has no Equals method, so krt compares it with "+
-				"reflect.DeepEqual, which is unreliable for %s (field %s). Implement `Equals(%s) bool`",
-			name, h.kind, h.path, name)
+				"reflect.DeepEqual. %s. %s",
+			name, fmt.Sprintf(hazardEffects[h.kind], h.path), remedy)
 	}
+}
+
+// remedyFor names the fix available at this site. Go only allows a method to be declared in
+// the package that defines the type, so for an element type from elsewhere -- a Kubernetes
+// CRD being the usual one -- telling the author to implement Equals asks for something the
+// compiler will not accept.
+func remedyFor(pass *analysis.Pass, elem types.Type, name string) string {
+	if n := namedOf(elem); n != nil && n.Obj().Pkg() != nil && n.Obj().Pkg() != pass.Pkg {
+		return "Equals cannot be declared on a type from another package: wrap it, or mark this " +
+			"collection " + IgnoreDirective + " if it never compares anything"
+	}
+	return fmt.Sprintf("Implement `Equals(%s) bool`", name)
+}
+
+// hazardEffects says what reflect.DeepEqual actually gets wrong for each kind of field, keyed
+// by hazard kind and taking the field path.
+//
+// All of them err in the same direction: a genuine difference is still caught, so the cost is
+// recomputation that changes nothing rather than a change that never propagates. That is worth
+// stating, because it is what makes an opt-out a reasonable answer at a site where the
+// comparison provably cannot run.
+var hazardEffects = map[string]string{
+	"protobuf messages": "Field %s reaches a protobuf message, which carries unexported state that " +
+		"marshaling writes in place, so two equal objects can compare unequal",
+	"func values": "Field %s is a func value, which is never equal unless both sides are nil, so " +
+		"every object looks changed on every recomputation",
+	"synchronization primitives": "Field %s holds a synchronization primitive, whose lock state is " +
+		"compared as if it were data",
 }
 
 type hazard struct {
