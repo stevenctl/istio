@@ -1,0 +1,110 @@
+# krtlint
+
+Static analysis for [`krt`](../../pkg/kube/krt) usage.
+
+`krt` is generic, but several of its core requirements cannot be expressed as generic
+constraints, so the compiler cannot enforce them. As the krt README puts it, violating
+them "will result in undefined behavior (which would likely manifest as stale data)".
+In practice the failure modes are a panic deep inside the framework, or — worse — change
+detection that silently stops working. These analyzers recover those requirements
+statically.
+
+## Running
+
+```bash
+go run ./tools/krtlint ./pilot/... ./pkg/...
+```
+
+Individual checks can be selected the same way as any `go vet` tool:
+
+```bash
+go run ./tools/krtlint -krtfetch ./pilot/...
+go run ./tools/krtlint -krtequalsfields=false ./pilot/...
+```
+
+## Checks
+
+### `krtkey`
+
+`krt.GetKey` derives an object's key by type-asserting the boxed value against a series of
+interfaces, and panics if none match. Because the assertion is on the *value*, a
+`ResourceName() string` declared on `*T` does not make `T` keyable — a mistake the compiler
+happily accepts. This reports collection constructors whose element type would panic,
+calling out the pointer-receiver case specifically.
+
+It also catches the subtler case of a defined string type: `krt.GetKey` matches
+`any(a).(string)`, which `type Host string` does not satisfy.
+
+### `krtequal`
+
+`krt.Equal` decides whether an object changed. It dispatches to an `Equals` method when the
+value or its address satisfies `Equaler[T]` or `Equaler[*T]`, and otherwise falls back to
+`proto.Equal` or `reflect.DeepEqual`. This reports element types where that fallback is
+unsafe:
+
+- An `Equals` method krt **cannot dispatch to**, because its parameter is neither `T` nor
+  `*T`. This is the worst case: the author believes comparison is handled, and krt silently
+  uses `reflect.DeepEqual` instead. Declaring `Equals(T)` on a collection of `*T` is the
+  usual way in.
+- Types reaching a **protobuf message** through their fields. `reflect.DeepEqual` compares
+  the unexported bookkeeping state protobuf messages carry, so it is not a reliable answer;
+  krt's own code notes that "DeepEqual on proto is broken".
+- Types embedding a protobuf message, which krt detects at runtime and **panics** on.
+- Types with **func** fields, which `reflect.DeepEqual` reports as unequal unless both are
+  nil, so every object looks changed on every recomputation.
+- Types with **synchronization primitives**, whose lock state is compared as data.
+
+### `krtequalsfields`
+
+A field missing from `Equals` is a field whose changes are invisible to every downstream
+collection. This reports `Equals` implementations that skip one. Fields that are genuinely
+derived from others, or are pure caches, can be marked:
+
+```go
+type AddressInfo struct {
+    Name string
+    // Marshaled is a cache of the fields above.
+    // +noKrtEquals
+    Marshaled []byte
+}
+```
+
+The check backs off entirely when the receiver or argument is used as a whole value (passed
+to `reflect.DeepEqual`, to a helper, or to a method), since such an implementation cannot be
+attributed to individual fields.
+
+This check is the same idea as [kgateway's `krtequals`](https://github.com/kgateway-dev/krtequals),
+adapted to istio's krt and to the marker convention above.
+
+### `krtfetch`
+
+krt learns what a transformation depended on by intercepting `krt.Fetch`, and uses that to
+decide what to recompute. Reading a collection any other way returns the data without
+registering the dependency, so the transformation is never re-run when that data changes and
+its output goes stale. This reports, inside any function taking a `krt.HandlerContext`:
+
+- `Collection.List`, `Collection.GetKey`, `Singleton.Get` and `Index.Lookup`, each with the
+  `Fetch` form to use instead.
+- `Register` / `RegisterBatch`, which leak a handler per invocation since transformations run
+  many times.
+- Calls to `time.Now`, the `math/rand` generators, and `os.Getenv`. Transformations "may be
+  called at any time, including many times for the same inputs", so a result derived from
+  these cannot be reproduced.
+
+### `krtfilter`
+
+Label and selector filters extract fields from the fetched object by type assertion and
+reflection; the krt README notes that "failures to meet this requirement will result in a
+`panic`". Worse, the panic only fires once a candidate object actually reaches the filter,
+so it can lie dormant. This reports `krt.FilterLabel`, `krt.FilterSelects` and
+`krt.FilterSelectsNonEmpty` applied to a collection whose element type provides neither the
+accessor method nor the `Spec.Selector` field krt falls back to.
+
+## Tests
+
+`internal/krtlint/testdata` holds a stub of the krt API, so the analyzer tests run against
+representative code without pulling in Kubernetes.
+
+```bash
+go test ./tools/krtlint/...
+```
