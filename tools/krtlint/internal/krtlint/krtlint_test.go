@@ -17,24 +17,27 @@ package krtlint
 import (
 	"testing"
 
-	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
+// TestAnalyzers runs each analyzer over its own testdata package. It drives them through
+// Analyzers() rather than the bare vars so that the //krtlint:ignore wrapping, which is what
+// ships, is the thing under test.
 func TestAnalyzers(t *testing.T) {
-	cases := []struct {
-		analyzer *analysis.Analyzer
-		pkg      string
-	}{
-		{KeyAnalyzer, "key"},
-		{EqualAnalyzer, "equal"},
-		{EqualsFieldsAnalyzer, "equalsfields"},
-		{FetchAnalyzer, "fetch"},
-		{FilterAnalyzer, "filter"},
+	pkg := map[string]string{
+		KeyAnalyzer.Name:          "key",
+		EqualAnalyzer.Name:        "equal",
+		EqualsFieldsAnalyzer.Name: "equalsfields",
+		FetchAnalyzer.Name:        "fetch",
+		FilterAnalyzer.Name:       "filter",
 	}
-	for _, tc := range cases {
-		t.Run(tc.analyzer.Name, func(t *testing.T) {
-			analysistest.Run(t, analysistest.TestData(), tc.analyzer, tc.pkg)
+	for _, a := range Analyzers() {
+		dir, ok := pkg[a.Name]
+		if !ok {
+			t.Fatalf("analyzer %s has no testdata package", a.Name)
+		}
+		t.Run(a.Name, func(t *testing.T) {
+			analysistest.Run(t, analysistest.TestData(), a, dir)
 		})
 	}
 }

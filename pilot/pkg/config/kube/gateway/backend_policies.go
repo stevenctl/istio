@@ -74,14 +74,19 @@ func (t TypedNamespacedNamePerHost) String() string {
 }
 
 type BackendPolicy struct {
-	Source       TypedNamespacedName
-	TargetIndex  int
+	Source      TypedNamespacedName
+	TargetIndex int
+	// +krtEqualsTodo: retargeting to a different backend that happens to serve the same Host
+	// keeps the key (Source/TargetIndex/Host) identical, which would leave this stale and with
+	// it the Target/Host index built over this collection.
 	Target       TypedNamespacedName
 	Host         string
 	SectionName  *string
 	TLS          *networking.ClientTLSSettings
 	LoadBalancer *networking.LoadBalancerSettings
 	RetryBudget  *networking.TrafficPolicy_RetryBudget
+	// +krtEqualsTodo: decides which policy wins a conflict. Only differs if the source is
+	// recreated with an otherwise identical spec, which normally arrives as a delete and an add.
 	CreationTime time.Time
 }
 

@@ -67,9 +67,13 @@ reports three shapes:
   than the other operand's, which is how a copy-paste error looks. The correct paired form,
   `for i := range a.F { a.F[i] == b.F[i] }`, is left alone.
 
-Fields genuinely derived from a compared field, or from the collection key, can be marked
-`+noKrtEquals`; known gaps can be marked `+krtEqualsTodo` and revisited with
-`-krtequalsfields.todos`. Both markers are already used in this repo.
+Fields that `ResourceName` reads are exempt automatically. They are part of the key, so a
+change to one produces a delete and an add rather than an update, and `Equals` is never asked
+about it.
+
+Fields genuinely derived from a compared field can be marked `+noKrtEquals`; known gaps can be
+marked `+krtEqualsTodo` and revisited with `-krtequalsfields.todos`. Both markers are already
+used in this repo.
 
 ```go
 type AddressInfo struct {
@@ -115,6 +119,34 @@ reflection; the krt README notes that "failures to meet this requirement will re
 so it can lie dormant. This reports `krt.FilterLabel`, `krt.FilterSelects` and
 `krt.FilterSelectsNonEmpty` applied to a collection whose element type provides neither the
 accessor method nor the `Spec.Selector` field krt falls back to.
+
+## Suppressing a diagnostic
+
+`//krtlint:ignore` opts a single site out of one or more analyzers. It works for every check,
+including the ones with no marker of their own.
+
+```go
+//krtlint:ignore                    // every analyzer
+//krtlint:ignore krtequal           // one
+//krtlint:ignore krtequal,krtfetch  // several
+```
+
+Text after `--` is a free-form reason, and the conventional form carries one:
+
+```go
+//krtlint:ignore krtequal -- placeholder collection, never written to
+krt.NewStaticCollection[*securityclient.PeerAuthentication](nil, nil),
+```
+
+A directive covers the comment group holding it and the line immediately after that group, so
+it can trail a statement or sit in the doc comment of the declaration it excuses. Keep the
+reason on the directive's own line — gofmt moves directives to the end of a doc comment block,
+stranding anything written below them — and put longer explanations in the prose above.
+
+Prefer `+noKrtEquals` on the field itself where that fits: it survives the code moving around,
+and it says which field is excused rather than silencing the whole method. Reach for
+`//krtlint:ignore` when the diagnostic is not about a single field, as with an `Equals` that
+compares by identity on purpose.
 
 ## Tests
 

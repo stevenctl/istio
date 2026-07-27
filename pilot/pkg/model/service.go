@@ -86,6 +86,8 @@ type Service struct {
 	ServiceAccounts []string `json:"serviceAccounts,omitempty"`
 
 	// CreationTime records the time this service was created, if available.
+	// +krtEqualsTodo: only differs if a source is recreated with an otherwise identical spec,
+	// which normally arrives as a delete and an add rather than an update.
 	CreationTime time.Time `json:"creationTime,omitempty"`
 
 	// Name of the service, e.g. "catalog.mystore.com"
@@ -126,6 +128,9 @@ type Service struct {
 	MeshExternal bool
 
 	// ResourceVersion represents the internal version of this object.
+	// +noKrtEquals: deliberately excluded. The API server bumps it on writes that change
+	// nothing we care about, and services built by a controller carry versions that are not
+	// comparable at all, so comparing it would report a change on every no-op update.
 	ResourceVersion string
 }
 
@@ -1164,12 +1169,15 @@ var _ AmbientIndexes = NoopAmbientIndexes{}
 
 type AddressInfo struct {
 	*workloadapi.Address
+	// Marshaled is the pre-marshaled form of Address, so it moves with it.
+	// +noKrtEquals
 	Marshaled *anypb.Any
 	// Version is a content-based hash of Marshaled, sent as the resource version over WDS.
 	// Clients echo it back in InitialResourceVersions on reconnect, letting the server skip
 	// resources the client already has; hashing the content keeps versions consistent across
 	// istiod replicas. Empty when no pre-marshaled form exists, in which case the resource is
 	// never skipped.
+	// +noKrtEquals
 	Version string
 }
 
@@ -1265,12 +1273,16 @@ type ServiceInfo struct {
 	MarshaledAddress *anypb.Any
 	// AsAddress contains a pre-created AddressInfo representation. This ensures we do not need repeated conversions on
 	// the hotpath
+	// +noKrtEquals: built from Service and MarshaledAddress, both compared.
 	AsAddress AddressInfo
 	// DNSConnectStrategy is the DNS connection strategy for this service. Used internally
 	// to generate status conditions.
 	DNSConnectStrategy DNSConnectStrategy
 	// CreationTime is the time when the service was created. Note this is used internally only
 	// for conflict resolution.
+	// +krtEqualsTodo: only differs if a source is recreated with an otherwise identical spec,
+	// which normally arrives as a delete and an add rather than an update. WorkloadInfo.Equals
+	// does compare its CreationTime; these two should agree either way.
 	CreationTime time.Time
 	// VisibilityConfigured reports whether MeshConfig.serviceEntryVisibility was set. Used internally
 	// only, to gate the VisibilityApplied status; the status value itself comes from Service.Visibility
@@ -1531,6 +1543,7 @@ type WorkloadInfo struct {
 	MarshaledAddress *anypb.Any
 	// AsAddress contains a pre-created AddressInfo representation. This ensures we do not need repeated conversions on
 	// the hotpath
+	// +noKrtEquals: built from Workload and MarshaledAddress, both compared.
 	AsAddress AddressInfo
 	Waypoint  WaypointBindingStatus
 }

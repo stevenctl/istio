@@ -125,6 +125,91 @@ func (i Ignored) Equals(o Ignored) bool {
 	return i.Named == o.Named && i.Port == o.Port
 }
 
+// Keyed builds its key from Source and Index, so neither can differ between two objects
+// Equals is asked about: a change to either produces a different key, and krt delivers that
+// as a delete and an add. Only Extra is genuinely uncompared.
+type Keyed struct {
+	Source string
+	Index  int
+	Extra  string
+	Value  int
+}
+
+func (k Keyed) ResourceName() string { return k.Source + "/" + string(rune(k.Index)) }
+
+func (k Keyed) Equals(o Keyed) bool { // want `equalsfields\.Keyed\.Equals does not compare Extra`
+	return k.Value == o.Value
+}
+
+// KeyedIndirect reaches its key fields through a helper. The field selection still happens in
+// ResourceName, so the exemption holds.
+type KeyedIndirect struct {
+	Source string
+	Value  int
+}
+
+func keyOf(s string) string { return "prefix/" + s }
+
+func (k KeyedIndirect) ResourceName() string { return keyOf(k.Source) }
+
+func (k KeyedIndirect) Equals(o KeyedIndirect) bool {
+	return k.Value == o.Value
+}
+
+// KeyedWhole hands its whole receiver to a helper, so which fields reach the key cannot be
+// told and nothing is exempted.
+type KeyedWhole struct {
+	krt.Named
+	Source string
+	Value  int
+}
+
+func nameOf(k KeyedWhole) string { return k.Source }
+
+func (k KeyedWhole) ResourceName() string { return nameOf(k) }
+
+func (k KeyedWhole) Equals(o KeyedWhole) bool { // want `equalsfields\.KeyedWhole\.Equals does not compare Source`
+	return k.Named == o.Named && k.Value == o.Value
+}
+
+// Identity compares by identity on purpose; the directive excuses the whole method. The
+// directive sits inside a doc comment whose reason runs on past it, which still reaches the
+// declaration because scoping is by comment group.
+type Identity struct {
+	krt.Named
+	Client  *int
+	Handler func()
+}
+
+// Equals compares two Identity values. The rest of the struct is runtime plumbing hung off
+// the thing Named identifies, not state a comparison could read.
+//
+//krtlint:ignore krtequalsfields -- identity equality on purpose, see above
+func (i Identity) Equals(o Identity) bool {
+	return i.Named == o.Named
+}
+
+// Trailing carries the directive on the reported line rather than above it.
+type Trailing struct {
+	krt.Named
+	Port int
+}
+
+func (t Trailing) Equals(o Trailing) bool { //krtlint:ignore -- deliberately partial
+	return t.Named == o.Named
+}
+
+// Unrelated names a different analyzer, so this diagnostic still fires.
+type Unrelated struct {
+	krt.Named
+	Port int
+}
+
+//krtlint:ignore krtfetch -- unrelated to this check
+func (u Unrelated) Equals(o Unrelated) bool { // want `equalsfields\.Unrelated\.Equals does not compare Port`
+	return u.Named == o.Named
+}
+
 // Delegating passes whole values to a helper, so per-field attribution is impossible and
 // the check backs off rather than guess.
 type Delegating struct {

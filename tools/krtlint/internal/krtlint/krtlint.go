@@ -28,6 +28,7 @@ import (
 	"go/ast"
 	"go/types"
 	"strings"
+	"sync"
 
 	"golang.org/x/tools/go/analysis"
 )
@@ -346,13 +347,23 @@ func identOf(e ast.Expr) *ast.Ident {
 	return nil
 }
 
-// Analyzers returns every krt analyzer.
+// Analyzers returns every krt analyzer, each honoring the //krtlint:ignore directive.
 func Analyzers() []*analysis.Analyzer {
-	return []*analysis.Analyzer{
+	analyzers.Do(func() {
+		for _, a := range all {
+			withIgnores(a)
+		}
+	})
+	return all
+}
+
+var (
+	analyzers sync.Once
+	all       = []*analysis.Analyzer{
 		KeyAnalyzer,
 		EqualAnalyzer,
 		EqualsFieldsAnalyzer,
 		FetchAnalyzer,
 		FilterAnalyzer,
 	}
-}
+)
