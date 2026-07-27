@@ -57,8 +57,10 @@ func (v ServiceVisibility) String() string {
 // identically for both dataplanes.
 type ServiceEntryVisibilityMatcher struct {
 	// defaultVisibility is applied when no policy matches.
+	// +noKrtEquals: compiled from source.
 	defaultVisibility ServiceVisibility
-	policies          []visibilityPolicy
+	// +noKrtEquals: compiled from source.
+	policies []visibilityPolicy
 	// source is retained only for equality, so a recompiled-but-identical value is not treated as a
 	// change by krt.
 	source *meshapi.ServiceEntryVisibility

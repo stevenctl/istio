@@ -25,7 +25,7 @@ import (
 
 const (
 	// ignoreMarker permanently excludes a field, for values genuinely derived from other
-	// compared fields or from the key.
+	// compared fields. To exempt a whole Equals method, use the //krtlint:ignore directive.
 	ignoreMarker = "+noKrtEquals"
 	// todoMarker excludes a field that is known to be missing but not yet fixed. These are
 	// reported with -krtequalsfields.todos.
@@ -49,6 +49,10 @@ known gaps can be marked ` + todoMarker + `.
 This also reports fields read from only one side of the comparison, which is the shape a
 copy-paste error takes: the field is compared against itself and can never differ.
 
+Fields that ResourceName reads are exempt automatically: they are part of the key, so a
+change to one produces a delete and an add rather than an update, and Equals is never asked
+about it.
+
 The check only runs on packages that import krt, and it backs off on any Equals method whose
 receiver or argument is used as a whole value, since it cannot then be attributed to
 individual fields.`,
@@ -65,16 +69,79 @@ func runEqualsFields(pass *analysis.Pass) (any, error) {
 		return nil, nil
 	}
 	exempt := exemptFields(pass.Files)
+	namers := methodDecls(pass, "ResourceName")
 	for _, file := range pass.Files {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Name.Name != "Equals" || fn.Recv == nil || fn.Body == nil {
 				continue
 			}
-			checkEqualsFields(pass, fn, exempt)
+			checkEqualsFields(pass, fn, exempt, namers)
 		}
 	}
 	return nil, nil
+}
+
+// methodDecls indexes the declarations of a named method by the type it is declared on.
+func methodDecls(pass *analysis.Pass, name string) map[types.Object]*ast.FuncDecl {
+	out := map[types.Object]*ast.FuncDecl{}
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != name || fn.Recv == nil || fn.Body == nil {
+				continue
+			}
+			obj, ok := pass.TypesInfo.Defs[fn.Name].(*types.Func)
+			if !ok {
+				continue
+			}
+			sig, ok := obj.Type().(*types.Signature)
+			if !ok || sig.Recv() == nil {
+				continue
+			}
+			if named := namedOf(sig.Recv().Type()); named != nil {
+				out[named.Obj()] = fn
+			}
+		}
+	}
+	return out
+}
+
+// namedOf returns the named type underlying t, dereferencing a single pointer.
+func namedOf(t types.Type) *types.Named {
+	base := types.Unalias(t)
+	if p, ok := base.(*types.Pointer); ok {
+		base = types.Unalias(p.Elem())
+	}
+	n, _ := base.(*types.Named)
+	return n
+}
+
+// keyFields returns the fields that a type's ResourceName method reads.
+//
+// A field the key is built from cannot go stale. Changing it changes the key, and krt
+// delivers that as a delete of the old object and an add of the new one, never as an update
+// that Equals could suppress. Leaving such a field out of Equals is correct by construction,
+// so reporting it is noise.
+//
+// This applies only when ResourceName is in fact how krt keys the type: a Kubernetes object
+// or a config.Config is keyed by its metadata, and any ResourceName it also happens to
+// declare is not consulted.
+func keyFields(info *types.Info, recvType types.Type, decl *ast.FuncDecl) map[string]bool {
+	if decl == nil || KeyOf(recvType) != KeyResourceNamer {
+		return nil
+	}
+	recv := onlyNamed(info, decl.Recv)
+	if recv == nil {
+		return nil
+	}
+	read, whole := fieldsRead(info, decl.Body, recv)
+	if whole {
+		// The receiver escaped into something we cannot see through, so we cannot tell
+		// which fields reach the key. Assume none do.
+		return nil
+	}
+	return read[recv]
 }
 
 func importsKrt(pkg *types.Package) bool {
@@ -89,7 +156,7 @@ func importsKrt(pkg *types.Package) bool {
 	return false
 }
 
-func checkEqualsFields(pass *analysis.Pass, fn *ast.FuncDecl, exempt map[string]bool) {
+func checkEqualsFields(pass *analysis.Pass, fn *ast.FuncDecl, exempt map[string]bool, namers map[types.Object]*ast.FuncDecl) {
 	obj, ok := pass.TypesInfo.Defs[fn.Name].(*types.Func)
 	if !ok {
 		return
@@ -121,11 +188,16 @@ func checkEqualsFields(pass *analysis.Pass, fn *ast.FuncDecl, exempt map[string]
 		return
 	}
 
+	var keyed map[string]bool
+	if named := namedOf(recvType); named != nil {
+		keyed = keyFields(pass.TypesInfo, recvType, namers[named.Obj()])
+	}
+
 	typeName := TypeName(recvType)
 	var missing, lopsided []string
 	for i := range strct.NumFields() {
 		name := strct.Field(i).Name()
-		if exempt[declaredName(recvType)+"."+name] {
+		if exempt[declaredName(recvType)+"."+name] || keyed[name] {
 			continue
 		}
 		inRecv, inParam := read[recv][name], read[param][name]
@@ -178,17 +250,21 @@ func plural(n int, one, many string) string {
 // equalsOperands returns the receiver and the parameter of an Equals method. Either is nil
 // when it is unnamed, in which case the body cannot be attributed.
 func equalsOperands(info *types.Info, fn *ast.FuncDecl) (recv, param types.Object) {
-	only := func(fields *ast.FieldList) types.Object {
-		if fields == nil || len(fields.List) != 1 || len(fields.List[0].Names) != 1 {
-			return nil
-		}
-		name := fields.List[0].Names[0]
-		if name.Name == "_" {
-			return nil
-		}
-		return info.Defs[name]
+	return onlyNamed(info, fn.Recv), onlyNamed(info, fn.Type.Params)
+}
+
+// onlyNamed returns the object declared by a field list holding exactly one named entry,
+// which is the shape of a receiver or a single parameter. It returns nil for a blank or
+// omitted name, which cannot be attributed to anything in the body.
+func onlyNamed(info *types.Info, fields *ast.FieldList) types.Object {
+	if fields == nil || len(fields.List) != 1 || len(fields.List[0].Names) != 1 {
+		return nil
 	}
-	return only(fn.Recv), only(fn.Type.Params)
+	name := fields.List[0].Names[0]
+	if name.Name == "_" {
+		return nil
+	}
+	return info.Defs[name]
 }
 
 // fieldsRead returns, per operand, the set of top-level struct fields read in the body.

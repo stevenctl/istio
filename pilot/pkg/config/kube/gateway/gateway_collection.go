@@ -39,9 +39,12 @@ import (
 
 type Gateway struct {
 	*config.Config `json:"config"`
-	Parent         parentKey  `json:"parent"`
-	ParentInfo     parentInfo `json:"parentInfo"`
-	Valid          bool       `json:"valid"`
+	// +noKrtEquals: identifies Config, which is compared.
+	Parent parentKey `json:"parent"`
+	// +noKrtEquals: projection of one of Config's listeners; it cannot differ while Config
+	// compares equal.
+	ParentInfo parentInfo `json:"parentInfo"`
+	Valid      bool       `json:"valid"`
 }
 
 func (g Gateway) ResourceName() string {
@@ -50,15 +53,18 @@ func (g Gateway) ResourceName() string {
 
 func (g Gateway) Equals(other Gateway) bool {
 	return g.Config.Equals(other.Config) &&
-		g.Valid == other.Valid // TODO: ok to ignore parent/parentInfo?
+		g.Valid == other.Valid
 }
 
 type ListenerSet struct {
 	*config.Config `json:"config"`
-	Parent         parentKey            `json:"parent"`
-	ParentInfo     parentInfo           `json:"parentInfo"`
-	GatewayParent  types.NamespacedName `json:"gatewayParent"`
-	Valid          bool                 `json:"valid"`
+	// +noKrtEquals: identifies Config, which is compared.
+	Parent parentKey `json:"parent"`
+	// +noKrtEquals: projection of one of Config's listeners; it cannot differ while Config
+	// compares equal.
+	ParentInfo    parentInfo           `json:"parentInfo"`
+	GatewayParent types.NamespacedName `json:"gatewayParent"`
+	Valid         bool                 `json:"valid"`
 }
 
 func (g ListenerSet) ResourceName() string {
@@ -68,7 +74,7 @@ func (g ListenerSet) ResourceName() string {
 func (g ListenerSet) Equals(other ListenerSet) bool {
 	return g.Config.Equals(other.Config) &&
 		g.GatewayParent == other.GatewayParent &&
-		g.Valid == other.Valid // TODO: ok to ignore parent/parentInfo?
+		g.Valid == other.Valid
 }
 
 func ListenerSetCollection(

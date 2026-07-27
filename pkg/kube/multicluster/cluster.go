@@ -127,6 +127,10 @@ func (c *Cluster) ResourceName() string {
 // Two clusters are considered equal if they have the same ID and kubeconfig SHA.
 // This avoids reflect.DeepEqual which always returns false for structs containing
 // non-nil function values (e.g., syncStatusCallback).
+// Every other field is live machinery hung off the connection those two describe (clients,
+// informers, channels, callbacks), not state a comparison could meaningfully read.
+//
+//krtlint:ignore krtequalsfields -- equality is by identity on purpose, see above
 func (c *Cluster) Equals(other *Cluster) bool {
 	return c.ID == other.ID && c.kubeConfigSha == other.kubeConfigSha
 }
