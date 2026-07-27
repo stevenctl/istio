@@ -23,28 +23,20 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-const (
-	// ignoreMarker permanently excludes a field, for values genuinely derived from other
-	// compared fields. To exempt a whole Equals method, use the //krtlint:ignore directive.
-	ignoreMarker = "+noKrtEquals"
-	// todoMarker excludes a field that is known to be missing but not yet fixed. These are
-	// reported with -krtequalsfields.todos.
-	todoMarker = "+krtEqualsTodo"
-)
-
-// reportTodos re-enables diagnostics for fields marked with todoMarker.
-var reportTodos bool
+// equalsFieldsName is spelled out rather than read back off the analyzer, which the field
+// exemption below would otherwise make an initialization cycle.
+const equalsFieldsName = "krtequalsfields"
 
 // EqualsFieldsAnalyzer reports Equals implementations that silently ignore a field.
 var EqualsFieldsAnalyzer = &analysis.Analyzer{
-	Name: "krtequalsfields",
+	Name: equalsFieldsName,
 	Doc: `check that a krt Equals method compares every field, on both sides
 
 krt uses Equals to decide whether an object changed, and keeps the old object when Equals
 returns true. A field left out of Equals therefore does not merely miss an event: it stays
-permanently stale in the collection until some compared field happens to change. Fields
-that are genuinely derived from a compared field can be marked ` + ignoreMarker + `, and
-known gaps can be marked ` + todoMarker + `.
+permanently stale in the collection until some compared field happens to change. A field
+that does not need comparing, because it is derived from one that is, can carry
+` + IgnoreDirective + ` with a reason.
 
 This also reports fields read from only one side of the comparison, which is the shape a
 copy-paste error takes: the field is compared against itself and can never differ.
@@ -57,11 +49,6 @@ The check only runs on packages that import krt, and it backs off on any Equals 
 receiver or argument is used as a whole value, since it cannot then be attributed to
 individual fields.`,
 	Run: runEqualsFields,
-}
-
-func init() {
-	EqualsFieldsAnalyzer.Flags.BoolVar(&reportTodos, "todos", false,
-		"also report fields marked "+todoMarker)
 }
 
 func runEqualsFields(pass *analysis.Pass) (any, error) {
@@ -214,7 +201,7 @@ func checkEqualsFields(pass *analysis.Pass, fn *ast.FuncDecl, exempt map[string]
 			"%s.Equals does not compare %s; krt keeps the old object when Equals returns true, "+
 				"so %s will stay stale. Compare the field, or mark it %s if it is derived from another field",
 			typeName, strings.Join(missing, ", "),
-			plural(len(missing), "this field", "these fields"), ignoreMarker)
+			plural(len(missing), "this field", "these fields"), IgnoreDirective)
 	}
 	for _, d := range selfLookups(pass.TypesInfo, fn.Body, recv, param) {
 		pass.Reportf(d.pos,
@@ -430,17 +417,23 @@ func exemptFields(files []*ast.File) map[string]bool {
 	return out
 }
 
+// isExempt reports whether a struct field carries an ignore directive naming this analyzer.
+//
+// A field is exempted here rather than by position because the diagnostic lands on the Equals
+// method, often in another file, so there is no line for the directive to sit on.
 func isExempt(field *ast.Field) bool {
+	if NoIgnore {
+		return false
+	}
 	for _, group := range []*ast.CommentGroup{field.Doc, field.Comment} {
 		if group == nil {
 			continue
 		}
-		text := group.Text()
-		if strings.Contains(text, ignoreMarker) {
-			return true
-		}
-		if !reportTodos && strings.Contains(text, todoMarker) {
-			return true
+		for _, comment := range group.List {
+			named, ok := parseIgnoreDirective(comment.Text)
+			if ok && (len(named) == 0 || named[equalsFieldsName]) {
+				return true
+			}
 		}
 	}
 	return false

@@ -63,7 +63,7 @@ func (p ParentReference) String() string {
 // Today, this is just Gateway
 type AgwParentInfo struct {
 	ParentGateway types.NamespacedName
-	// +krtEqualsTodo ensure gateway class changes trigger equality differences
+	//nokrtlint:krtequalsfields -- TODO ensure gateway class changes trigger equality differences
 	ParentGatewayClassName string
 	// InternalName refers to the internal name we can reference it by. For example "my-ns/my-gateway"
 	InternalName string

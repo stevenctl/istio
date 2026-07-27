@@ -102,22 +102,34 @@ func (p PairedLookup) Equals(o PairedLookup) bool {
 	return p.Named == o.Named
 }
 
-// Todo carries a known-gap marker, which is suppressed unless -todos is set.
-type Todo struct {
+// Scoped names this analyzer specifically, so the field is exempt here.
+type Scoped struct {
 	krt.Named
-	// +krtEqualsTodo compare the class name once churn is understood
+	// Class is not worth comparing yet.
+	//nokrtlint:krtequalsfields -- churn is not understood
 	Class string
 }
 
-func (t Todo) Equals(o Todo) bool {
+func (t Scoped) Equals(o Scoped) bool {
 	return t.Named == o.Named
+}
+
+// Elsewhere names a different analyzer, so this field is still reported.
+type Elsewhere struct {
+	krt.Named
+	//nokrtlint:krtfetch -- unrelated to this check
+	Class string
+}
+
+func (e Elsewhere) Equals(o Elsewhere) bool { // want `equalsfields\.Elsewhere\.Equals does not compare Class`
+	return e.Named == o.Named
 }
 
 type Ignored struct {
 	krt.Named
 	Port int
 	// Marshaled is a cache of the fields above.
-	// +noKrtEquals
+	//nokrtlint
 	Marshaled []byte
 }
 
@@ -184,7 +196,7 @@ type Identity struct {
 // Equals compares two Identity values. The rest of the struct is runtime plumbing hung off
 // the thing Named identifies, not state a comparison could read.
 //
-//krtlint:ignore krtequalsfields -- identity equality on purpose, see above
+//nokrtlint:krtequalsfields -- identity equality on purpose, see above
 func (i Identity) Equals(o Identity) bool {
 	return i.Named == o.Named
 }
@@ -195,7 +207,7 @@ type Trailing struct {
 	Port int
 }
 
-func (t Trailing) Equals(o Trailing) bool { //krtlint:ignore -- deliberately partial
+func (t Trailing) Equals(o Trailing) bool { //nokrtlint -- deliberately partial
 	return t.Named == o.Named
 }
 
@@ -205,7 +217,7 @@ type Unrelated struct {
 	Port int
 }
 
-//krtlint:ignore krtfetch -- unrelated to this check
+//nokrtlint:krtfetch -- unrelated to this check
 func (u Unrelated) Equals(o Unrelated) bool { // want `equalsfields\.Unrelated\.Equals does not compare Port`
 	return u.Named == o.Named
 }

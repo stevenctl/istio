@@ -17,11 +17,16 @@
 package main
 
 import (
+	"flag"
+
 	"golang.org/x/tools/go/analysis/multichecker"
 
 	"istio.io/istio/tools/krtlint/internal/krtlint"
 )
 
 func main() {
+	// multichecker parses flag.CommandLine, so registering here gets -noignore alongside its
+	// own flags rather than scoped to one analyzer as -krtequal.noignore would be.
+	krtlint.RegisterFlags(flag.CommandLine)
 	multichecker.Main(krtlint.Analyzers()...)
 }

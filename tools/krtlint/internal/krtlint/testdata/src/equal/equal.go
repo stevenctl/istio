@@ -107,7 +107,7 @@ func bad(c krt.Collection[Input]) {
 func badAgain(c krt.Collection[Input]) {
 	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithProto { return nil }) // want `Field Inner\.Address reaches a protobuf message`
 	krt.NewStaticCollection[*WithProto](nil, nil)                                         // want `Field Inner\.Address reaches a protobuf message`
-	//krtlint:ignore krtequal -- placeholder, never written to
+	//nokrtlint:krtequal -- placeholder, never written to
 	krt.NewStaticCollection[*WithProto](nil, nil)
 }
 

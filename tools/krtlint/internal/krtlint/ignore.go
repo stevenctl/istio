@@ -15,36 +15,52 @@
 package krtlint
 
 import (
+	"flag"
 	"go/token"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
 )
 
-// IgnoreDirective opts a single site out of one or more krt analyzers.
+// IgnoreDirective opts out of one or more krt analyzers, in the shape of //nolint.
 //
-//	//krtlint:ignore                        -- silence every analyzer here
-//	//krtlint:ignore krtequal               -- silence one
-//	//krtlint:ignore krtequal,krtfetch      -- silence several
+//	//nokrtlint                      -- silence every analyzer
+//	//nokrtlint:krtequal             -- silence one
+//	//nokrtlint:krtequal,krtfetch    -- silence several
 //
-// Text after the directive is a free-form reason and is not interpreted, so the conventional
-// form carries one:
+// Text after `--` is a free-form reason and is not interpreted, so the conventional form
+// carries one:
 //
-//	//krtlint:ignore krtequal -- placeholder collection, never written to
+//	//nokrtlint:krtequal -- placeholder collection, never written to
 //
 // Keep the reason on the directive's own line. gofmt moves directive comments to the end of a
 // doc comment block, which would strand any continuation lines above them; put a longer
 // explanation in the prose before the directive instead.
 //
-// A directive applies to diagnostics reported anywhere in the comment group holding it, and on
-// the line immediately after that group. That covers the two ways it is written: trailing a
-// statement, or inside the doc comment of the declaration being excused, in which case the
-// surrounding prose is part of the same group and the directive still reaches the declaration.
+// What it covers depends on where it sits. On a struct field it exempts that field wherever it
+// is reported from, which is what krtequalsfields needs, since that diagnostic lands on the
+// Equals method rather than on the field. Anywhere else it covers diagnostics reported in the
+// comment group holding it and on the line immediately after, so it can trail a statement or
+// sit in the doc comment of the declaration it excuses.
 //
-// Prefer +noKrtEquals on the field itself where that fits, since it survives the code moving
-// around; reach for this when the diagnostic is not about a single field, or comes from an
-// analyzer that has no marker of its own.
-const IgnoreDirective = "//krtlint:ignore"
+// Prefer the field form where it fits: it says which field is excused rather than silencing a
+// whole method, and it survives the code moving around.
+//
+// -noignore disables every directive at once, which is the only way to see what a tree has
+// silenced.
+const IgnoreDirective = "//nokrtlint"
+
+// NoIgnore disables every directive, so a run reports what the tree has silenced. Nothing else
+// can surface that: a directive leaves no trace in the output it suppresses.
+var NoIgnore bool
+
+// RegisterFlags adds krtlint's own flags to a flag set. The analysis framework scopes a flag to
+// the analyzer that declares it, and suppression is not one analyzer's concern, so this is
+// registered globally by main instead.
+func RegisterFlags(fs *flag.FlagSet) {
+	fs.BoolVar(&NoIgnore, "noignore", false,
+		"report diagnostics that "+IgnoreDirective+" directives would silence")
+}
 
 // ignoreSet records which analyzers are silenced on which lines of which files.
 type ignoreSet struct {
@@ -136,8 +152,14 @@ func parseIgnoreDirective(text string) (map[string]bool, bool) {
 	if !ok {
 		return nil, false
 	}
-	// Guard against matching a longer directive that merely shares the prefix.
-	if body != "" && !strings.HasPrefix(body, " ") && !strings.HasPrefix(body, "\t") {
+	// The analyzer list is attached with a colon, as //nolint does. Anything else touching the
+	// directive is a longer word that merely starts the same way.
+	switch {
+	case body == "":
+	case strings.HasPrefix(body, ":"):
+		body = body[1:]
+	case strings.HasPrefix(body, " "), strings.HasPrefix(body, "\t"):
+	default:
 		return nil, false
 	}
 	// Everything from the reason separator on is prose.
@@ -163,6 +185,9 @@ func parseIgnoreDirective(text string) (map[string]bool, bool) {
 func withIgnores(a *analysis.Analyzer) *analysis.Analyzer {
 	run := a.Run
 	a.Run = func(pass *analysis.Pass) (any, error) {
+		if NoIgnore {
+			return run(pass)
+		}
 		ignores := parseIgnores(pass)
 		filtered := *pass
 		filtered.Report = func(d analysis.Diagnostic) {

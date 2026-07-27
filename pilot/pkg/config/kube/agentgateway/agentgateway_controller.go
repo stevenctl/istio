@@ -540,7 +540,7 @@ func (c *Controller) buildAddressCollections(opts krt.OptionsBuilder) krt.Collec
 		meshConfig,
 		// Authz/Authn are not use for agentgateway, ignore
 		krt.NewStaticCollection[model.WorkloadAuthorization](nil, nil),
-		//krtlint:ignore krtequal -- placeholder, permanently empty, so nothing is ever compared
+		//nokrtlint:krtequal -- placeholder, permanently empty, so nothing is ever compared
 		krt.NewStaticCollection[*securityclient.PeerAuthentication](nil, nil),
 		waypoints,
 		services,

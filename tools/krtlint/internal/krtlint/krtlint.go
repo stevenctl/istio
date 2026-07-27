@@ -347,7 +347,7 @@ func identOf(e ast.Expr) *ast.Ident {
 	return nil
 }
 
-// Analyzers returns every krt analyzer, each honoring the //krtlint:ignore directive.
+// Analyzers returns every krt analyzer, each honoring the //nokrtlint directive.
 func Analyzers() []*analysis.Analyzer {
 	analyzers.Do(func() {
 		for _, a := range all {

@@ -39,10 +39,11 @@ import (
 
 type Gateway struct {
 	*config.Config `json:"config"`
-	// +noKrtEquals: identifies Config, which is compared.
+	// Identifies Config, which is compared.
+	//nokrtlint:krtequalsfields
 	Parent parentKey `json:"parent"`
-	// +noKrtEquals: projection of one of Config's listeners; it cannot differ while Config
-	// compares equal.
+	// Projection of one of Config's listeners; it cannot differ while Config compares equal.
+	//nokrtlint:krtequalsfields
 	ParentInfo parentInfo `json:"parentInfo"`
 	Valid      bool       `json:"valid"`
 }
@@ -58,10 +59,11 @@ func (g Gateway) Equals(other Gateway) bool {
 
 type ListenerSet struct {
 	*config.Config `json:"config"`
-	// +noKrtEquals: identifies Config, which is compared.
+	// Identifies Config, which is compared.
+	//nokrtlint:krtequalsfields
 	Parent parentKey `json:"parent"`
-	// +noKrtEquals: projection of one of Config's listeners; it cannot differ while Config
-	// compares equal.
+	// Projection of one of Config's listeners; it cannot differ while Config compares equal.
+	//nokrtlint:krtequalsfields
 	ParentInfo    parentInfo           `json:"parentInfo"`
 	GatewayParent types.NamespacedName `json:"gatewayParent"`
 	Valid         bool                 `json:"valid"`
