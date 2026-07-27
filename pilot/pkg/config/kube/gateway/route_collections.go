@@ -717,8 +717,9 @@ func (i RouteContextInputs) WithCtx(krtctx krt.HandlerContext) RouteContext {
 
 type RouteWithKey struct {
 	config.Config
-	// +noKrtEquals: the parent reference and hostname this VirtualService was generated for,
-	// the same inputs that name Config.
+	// The parent reference and hostname this VirtualService was generated for, the same inputs
+	// that name Config.
+	//nokrtlint:krtequalsfields
 	Key string
 }
 

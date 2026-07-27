@@ -66,7 +66,7 @@ at all:
 
 These all err in the same direction: a genuine difference is still caught, so the cost is
 recomputation that changes nothing rather than a change that never propagates. That is why a
-site which provably never compares anything can reasonably carry a `//krtlint:ignore` — and
+site which provably never compares anything can reasonably carry a `//nokrtlint` — and
 why it is still worth reporting, since only the author knows that.
 
 Where the element type comes from another package, as Kubernetes CRDs do, the report says so:
@@ -89,15 +89,14 @@ Fields that `ResourceName` reads are exempt automatically. They are part of the 
 change to one produces a delete and an add rather than an update, and `Equals` is never asked
 about it.
 
-Fields genuinely derived from a compared field can be marked `+noKrtEquals`; known gaps can be
-marked `+krtEqualsTodo` and revisited with `-krtequalsfields.todos`. Both markers are already
-used in this repo.
+A field that does not need comparing, because it is derived from one that is, can carry a
+`//nokrtlint` directive.
 
 ```go
 type AddressInfo struct {
     Name string
     // Marshaled is a cache of the fields above.
-    // +noKrtEquals
+    //nokrtlint:krtequalsfields
     Marshaled []byte
 }
 ```
@@ -140,31 +139,46 @@ accessor method nor the `Spec.Selector` field krt falls back to.
 
 ## Suppressing a diagnostic
 
-`//krtlint:ignore` opts a single site out of one or more analyzers. It works for every check,
-including the ones with no marker of their own.
+`//nokrtlint` opts out of one or more analyzers, in the shape of `//nolint`.
 
 ```go
-//krtlint:ignore                    // every analyzer
-//krtlint:ignore krtequal           // one
-//krtlint:ignore krtequal,krtfetch  // several
+//nokrtlint                    // every analyzer
+//nokrtlint:krtequal           // one
+//nokrtlint:krtequal,krtfetch  // several
 ```
 
 Text after `--` is a free-form reason, and the conventional form carries one:
 
 ```go
-//krtlint:ignore krtequal -- placeholder collection, never written to
+//nokrtlint:krtequal -- placeholder collection, never written to
 krt.NewStaticCollection[*securityclient.PeerAuthentication](nil, nil),
 ```
 
-A directive covers the comment group holding it and the line immediately after that group, so
-it can trail a statement or sit in the doc comment of the declaration it excuses. Keep the
-reason on the directive's own line — gofmt moves directives to the end of a doc comment block,
-stranding anything written below them — and put longer explanations in the prose above.
+What it covers depends on where it sits. On a **struct field** it exempts that field wherever
+the diagnostic is reported from, which is what `krtequalsfields` needs, since that report lands
+on the `Equals` method rather than on the field. **Anywhere else** it covers the comment group
+holding it and the line immediately after, so it can trail a statement or sit in the doc comment
+of the declaration it excuses.
 
-Prefer `+noKrtEquals` on the field itself where that fits: it survives the code moving around,
-and it says which field is excused rather than silencing the whole method. Reach for
-`//krtlint:ignore` when the diagnostic is not about a single field, as with an `Equals` that
-compares by identity on purpose.
+Prefer the field form where it fits: it says which field is excused rather than silencing a
+whole method, and it survives the code moving around.
+
+Keep the reason on the directive's own line. gofmt moves directive comments to the end of a doc
+comment block, which strands anything written below them; put longer explanations in the prose
+above.
+
+### Seeing what has been suppressed
+
+A directive leaves no trace in the output it silences, so `-noignore` disables all of them at
+once. This is the only way to audit what a tree has opted out of.
+
+```bash
+go run ./tools/krtlint ./pilot/...            # what CI enforces
+go run ./tools/krtlint -noignore ./pilot/...  # every suppression revealed
+```
+
+Running it as a separate non-blocking job keeps `make lint-krt` green on the intentional set
+while leaving the accepted debt visible.
 
 ## Tests
 

@@ -21,7 +21,7 @@ import (
 )
 
 // TestAnalyzers runs each analyzer over its own testdata package. It drives them through
-// Analyzers() rather than the bare vars so that the //krtlint:ignore wrapping, which is what
+// Analyzers() rather than the bare vars so that the //nokrtlint wrapping, which is what
 // ships, is the thing under test.
 func TestAnalyzers(t *testing.T) {
 	pkg := map[string]string{
