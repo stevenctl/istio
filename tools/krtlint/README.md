@@ -56,9 +56,20 @@ unsafe:
 
 ### `krtequalsfields`
 
-A field missing from `Equals` is a field whose changes are invisible to every downstream
-collection. This reports `Equals` implementations that skip one. Fields that are genuinely
-derived from others, or are pure caches, can be marked:
+When `Equals` returns true krt keeps the *old* object (`collection.go:515-518`), so a field
+missing from `Equals` does not merely miss an event — it stays permanently stale in the
+collection, and in any index built on it, until some compared field happens to change. This
+reports three shapes:
+
+- A field **never compared**.
+- A field read from **only one operand**, so it is compared against itself.
+- A loop that ranges over one operand's field and then indexes **that same field** rather
+  than the other operand's, which is how a copy-paste error looks. The correct paired form,
+  `for i := range a.F { a.F[i] == b.F[i] }`, is left alone.
+
+Fields genuinely derived from a compared field, or from the collection key, can be marked
+`+noKrtEquals`; known gaps can be marked `+krtEqualsTodo` and revisited with
+`-krtequalsfields.todos`. Both markers are already used in this repo.
 
 ```go
 type AddressInfo struct {
@@ -69,12 +80,13 @@ type AddressInfo struct {
 }
 ```
 
-The check backs off entirely when the receiver or argument is used as a whole value (passed
-to `reflect.DeepEqual`, to a helper, or to a method), since such an implementation cannot be
+Comparing a promoted field counts as comparing the embedded field it belongs to. The check
+backs off entirely when the receiver or argument is used as a whole value (passed to
+`reflect.DeepEqual`, to a helper, or to a method), since such an implementation cannot be
 attributed to individual fields.
 
 This check is the same idea as [kgateway's `krtequals`](https://github.com/kgateway-dev/krtequals),
-adapted to istio's krt and to the marker convention above.
+adapted to istio's krt and extended with the two comparison-shape checks above.
 
 ### `krtfetch`
 
@@ -90,6 +102,10 @@ its output goes stale. This reports, inside any function taking a `krt.HandlerCo
 - Calls to `time.Now`, the `math/rand` generators, and `os.Getenv`. Transformations "may be
   called at any time, including many times for the same inputs", so a result derived from
   these cannot be reproduced.
+
+Reads that only feed a log message are ignored, since they do not affect the output.
+`krt.RecomputeProtected.Get(ctx)` is the sanctioned escape hatch for out-of-band state and
+registers its own dependency, so it is not reported.
 
 ### `krtfilter`
 

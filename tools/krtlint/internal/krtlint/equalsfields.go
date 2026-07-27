@@ -16,44 +16,62 @@ package krtlint
 
 import (
 	"go/ast"
+	"go/token"
 	"go/types"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
 )
 
-// ignoreMarker opts a field out of the completeness check, for fields that are genuinely
-// derived from others or are pure caches.
-const ignoreMarker = "+noKrtEquals"
+const (
+	// ignoreMarker permanently excludes a field, for values genuinely derived from other
+	// compared fields or from the key.
+	ignoreMarker = "+noKrtEquals"
+	// todoMarker excludes a field that is known to be missing but not yet fixed. These are
+	// reported with -krtequalsfields.todos.
+	todoMarker = "+krtEqualsTodo"
+)
+
+// reportTodos re-enables diagnostics for fields marked with todoMarker.
+var reportTodos bool
 
 // EqualsFieldsAnalyzer reports Equals implementations that silently ignore a field.
 var EqualsFieldsAnalyzer = &analysis.Analyzer{
 	Name: "krtequalsfields",
-	Doc: `check that a krt Equals method compares every field
+	Doc: `check that a krt Equals method compares every field, on both sides
 
-krt uses Equals to decide whether an object changed. A field left out of Equals is a field
-whose changes are invisible to every downstream collection, which produces stale output
-that is very hard to trace back. Fields that are intentionally excluded (caches, derived
-values) can be marked with a ` + ignoreMarker + ` comment.
+krt uses Equals to decide whether an object changed, and keeps the old object when Equals
+returns true. A field left out of Equals therefore does not merely miss an event: it stays
+permanently stale in the collection until some compared field happens to change. Fields
+that are genuinely derived from a compared field can be marked ` + ignoreMarker + `, and
+known gaps can be marked ` + todoMarker + `.
 
-This check only runs on packages that import krt, and it bails out on any Equals method
-whose receiver or argument is used as a whole value, since such an implementation cannot
-be attributed to individual fields.`,
+This also reports fields read from only one side of the comparison, which is the shape a
+copy-paste error takes: the field is compared against itself and can never differ.
+
+The check only runs on packages that import krt, and it backs off on any Equals method whose
+receiver or argument is used as a whole value, since it cannot then be attributed to
+individual fields.`,
 	Run: runEqualsFields,
+}
+
+func init() {
+	EqualsFieldsAnalyzer.Flags.BoolVar(&reportTodos, "todos", false,
+		"also report fields marked "+todoMarker)
 }
 
 func runEqualsFields(pass *analysis.Pass) (any, error) {
 	if !importsKrt(pass.Pkg) {
 		return nil, nil
 	}
-	ignored := ignoredFields(pass.Files)
+	exempt := exemptFields(pass.Files)
 	for _, file := range pass.Files {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Name.Name != "Equals" || fn.Recv == nil || fn.Body == nil {
 				continue
 			}
-			checkEqualsFields(pass, fn, ignored)
+			checkEqualsFields(pass, fn, exempt)
 		}
 	}
 	return nil, nil
@@ -71,7 +89,7 @@ func importsKrt(pkg *types.Package) bool {
 	return false
 }
 
-func checkEqualsFields(pass *analysis.Pass, fn *ast.FuncDecl, ignored map[string]bool) {
+func checkEqualsFields(pass *analysis.Pass, fn *ast.FuncDecl, exempt map[string]bool) {
 	obj, ok := pass.TypesInfo.Defs[fn.Name].(*types.Func)
 	if !ok {
 		return
@@ -84,8 +102,8 @@ func checkEqualsFields(pass *analysis.Pass, fn *ast.FuncDecl, ignored map[string
 	if p, ok := types.Unalias(recvType).(*types.Pointer); ok {
 		recvType = p.Elem()
 	}
-	// Only check methods krt will actually dispatch to; a mismatched signature is
-	// reported by the krtequal analyzer instead.
+	// Only check methods krt will actually dispatch to; a mismatched signature is reported
+	// by the krtequal analyzer instead.
 	if EqualsMethod(recvType) == nil {
 		return
 	}
@@ -94,35 +112,55 @@ func checkEqualsFields(pass *analysis.Pass, fn *ast.FuncDecl, ignored map[string
 		return
 	}
 
-	vars := equalsOperands(pass.TypesInfo, fn)
-	if len(vars) == 0 {
+	recv, param := equalsOperands(pass.TypesInfo, fn)
+	if recv == nil || param == nil {
 		return
 	}
-	compared, whole := comparedFields(pass.TypesInfo, fn.Body, vars)
+	read, whole := fieldsRead(pass.TypesInfo, fn.Body, recv, param)
 	if whole {
 		return
 	}
 
 	typeName := TypeName(recvType)
-	var missing []string
+	var missing, lopsided []string
 	for i := range strct.NumFields() {
-		f := strct.Field(i)
-		if compared[f.Name()] || ignored[declaredName(recvType)+"."+f.Name()] {
+		name := strct.Field(i).Name()
+		if exempt[declaredName(recvType)+"."+name] {
 			continue
 		}
-		missing = append(missing, f.Name())
+		inRecv, inParam := read[recv][name], read[param][name]
+		switch {
+		case !inRecv && !inParam:
+			missing = append(missing, name)
+		case inRecv != inParam:
+			lopsided = append(lopsided, name)
+		}
 	}
-	if len(missing) == 0 {
-		return
+
+	if len(missing) > 0 {
+		pass.Reportf(fn.Pos(),
+			"%s.Equals does not compare %s; krt keeps the old object when Equals returns true, "+
+				"so %s will stay stale. Compare the field, or mark it %s if it is derived from another field",
+			typeName, strings.Join(missing, ", "),
+			plural(len(missing), "this field", "these fields"), ignoreMarker)
 	}
-	pass.Reportf(fn.Pos(),
-		"%s.Equals does not compare %s; krt will not see changes to %s. "+
-			"Compare the field, or mark it %s if it is derived from another field",
-		typeName, strings.Join(missing, ", "), plural(len(missing), "this field", "these fields"), ignoreMarker)
+	for _, d := range selfLookups(pass.TypesInfo, fn.Body, recv, param) {
+		pass.Reportf(d.pos,
+			"%s.Equals indexes %s.%s inside a loop over that same field, and never indexes the "+
+				"other operand's %s; this comparison can never fail",
+			typeName, d.operand, d.field, d.field)
+	}
+	if len(lopsided) > 0 {
+		pass.Reportf(fn.Pos(),
+			"%s.Equals reads %s from only one operand (%s); the field is compared against "+
+				"itself and can never differ",
+			typeName, strings.Join(lopsided, ", "),
+			plural(len(lopsided), "this field", "these fields"))
+	}
 }
 
-// declaredName returns the bare (unqualified) name of a named type, matching how struct
-// declarations are keyed in the source.
+// declaredName returns the bare name of a named type, matching how struct declarations are
+// keyed in the source.
 func declaredName(t types.Type) string {
 	if n, ok := types.Unalias(t).(*types.Named); ok {
 		return n.Obj().Name()
@@ -137,41 +175,34 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// equalsOperands returns the receiver and the single parameter of an Equals method.
-func equalsOperands(info *types.Info, fn *ast.FuncDecl) map[types.Object]bool {
-	out := map[types.Object]bool{}
-	add := func(fields *ast.FieldList) {
-		if fields == nil {
-			return
+// equalsOperands returns the receiver and the parameter of an Equals method. Either is nil
+// when it is unnamed, in which case the body cannot be attributed.
+func equalsOperands(info *types.Info, fn *ast.FuncDecl) (recv, param types.Object) {
+	only := func(fields *ast.FieldList) types.Object {
+		if fields == nil || len(fields.List) != 1 || len(fields.List[0].Names) != 1 {
+			return nil
 		}
-		for _, f := range fields.List {
-			for _, name := range f.Names {
-				if name.Name == "_" {
-					continue
-				}
-				if obj, ok := info.Defs[name]; ok && obj != nil {
-					out[obj] = true
-				}
-			}
+		name := fields.List[0].Names[0]
+		if name.Name == "_" {
+			return nil
 		}
+		return info.Defs[name]
 	}
-	add(fn.Recv)
-	add(fn.Type.Params)
-	// An unnamed receiver or parameter cannot be attributed, and neither can a body that
-	// does not name both operands.
-	if len(out) != 2 {
-		return nil
-	}
-	return out
+	return only(fn.Recv), only(fn.Type.Params)
 }
 
-// comparedFields returns the set of receiver fields read in the body. whole is true when
-// an operand is used as a complete value, in which case the body cannot be attributed to
-// individual fields and no diagnostic should be produced.
-func comparedFields(info *types.Info, body *ast.BlockStmt, vars map[types.Object]bool) (compared map[string]bool, whole bool) {
-	compared = map[string]bool{}
-	// Idents that appear as the base of a field selection are accounted for; any other
-	// use means the operand escaped into something we cannot reason about.
+// fieldsRead returns, per operand, the set of top-level struct fields read in the body.
+// whole is true when an operand is used as a complete value, in which case the body cannot
+// be attributed to individual fields.
+func fieldsRead(info *types.Info, body *ast.BlockStmt, operands ...types.Object) (map[types.Object]map[string]bool, bool) {
+	isOperand := map[types.Object]bool{}
+	read := map[types.Object]map[string]bool{}
+	for _, o := range operands {
+		isOperand[o] = true
+		read[o] = map[string]bool{}
+	}
+	// Idents appearing as the base of a field selection are accounted for; any other use
+	// means the operand escaped into something we cannot reason about.
 	accountedFor := map[*ast.Ident]bool{}
 
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -180,32 +211,124 @@ func comparedFields(info *types.Info, body *ast.BlockStmt, vars map[types.Object
 			return true
 		}
 		base, ok := ast.Unparen(sel.X).(*ast.Ident)
-		if !ok || !vars[info.Uses[base]] {
+		if !ok {
+			return true
+		}
+		operand := info.Uses[base]
+		if !isOperand[operand] {
 			return true
 		}
 		selection, ok := info.Selections[sel]
 		if !ok || selection.Kind() != types.FieldVal {
-			// A method call on the operand; the operand is fully consumed by it.
+			// A method call on the operand, which consumes it whole.
 			return true
 		}
+		// A selection through an embedded field has a multi-step index path. Attribute it
+		// to the outermost field, which is the one declared on this struct: comparing
+		// `a.Labels` where Labels is promoted does compare the embedded field.
+		field := selection.Obj()
+		if path := selection.Index(); len(path) > 1 {
+			if s, ok := StructOf(operand.Type()); ok {
+				field = s.Field(path[0])
+			}
+		}
 		accountedFor[base] = true
-		compared[sel.Sel.Name] = true
+		read[operand][field.Name()] = true
 		return true
 	})
 
+	whole := false
 	ast.Inspect(body, func(n ast.Node) bool {
 		id, ok := n.(*ast.Ident)
-		if !ok || !vars[info.Uses[id]] || accountedFor[id] {
+		if !ok || !isOperand[info.Uses[id]] || accountedFor[id] {
 			return true
 		}
 		whole = true
 		return false
 	})
-	return compared, whole
+	return read, whole
 }
 
-// ignoredFields collects `Type.Field` keys for fields carrying the opt-out marker.
-func ignoredFields(files []*ast.File) map[string]bool {
+type selfLookup struct {
+	pos     token.Pos
+	operand string
+	field   string
+}
+
+// selfLookups finds `for k := range a.F { ... a.F[k] ... }` inside an Equals body where the
+// other operand's F is never indexed. Ranging over one operand's collection and then
+// indexing that same one, rather than its counterpart, is a copy-paste error: the lookup
+// can only ever return the value being ranged over.
+//
+// The common correct form, `for i := range a.F { a.F[i] == b.F[i] }`, indexes both and is
+// left alone.
+func selfLookups(info *types.Info, body *ast.BlockStmt, recv, param types.Object) []selfLookup {
+	// operandField returns the operand and field name for a selector rooted at recv or param.
+	operandField := func(e ast.Expr) (types.Object, string, bool) {
+		sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
+		if !ok {
+			return nil, "", false
+		}
+		base, ok := ast.Unparen(sel.X).(*ast.Ident)
+		if !ok {
+			return nil, "", false
+		}
+		obj := info.Uses[base]
+		if obj != recv && obj != param {
+			return nil, "", false
+		}
+		if s, ok := info.Selections[sel]; !ok || s.Kind() != types.FieldVal {
+			return nil, "", false
+		}
+		return obj, sel.Sel.Name, true
+	}
+
+	var out []selfLookup
+	ast.Inspect(body, func(n ast.Node) bool {
+		rng, ok := n.(*ast.RangeStmt)
+		if !ok {
+			return true
+		}
+		ranged, field, ok := operandField(rng.X)
+		if !ok {
+			return true
+		}
+		counterpart := param
+		if ranged == param {
+			counterpart = recv
+		}
+		// Collect every indexing of this field within the loop, by either operand.
+		var selfIndexed []token.Pos
+		counterpartIndexed := false
+		ast.Inspect(rng.Body, func(n ast.Node) bool {
+			idx, ok := n.(*ast.IndexExpr)
+			if !ok {
+				return true
+			}
+			obj, name, ok := operandField(idx.X)
+			if !ok || name != field {
+				return true
+			}
+			if obj == counterpart {
+				counterpartIndexed = true
+			} else {
+				selfIndexed = append(selfIndexed, idx.Pos())
+			}
+			return true
+		})
+		if counterpartIndexed {
+			return true
+		}
+		for _, pos := range selfIndexed {
+			out = append(out, selfLookup{pos: pos, operand: ranged.Name(), field: field})
+		}
+		return true
+	})
+	return out
+}
+
+// exemptFields collects `Type.Field` keys for fields carrying an opt-out marker.
+func exemptFields(files []*ast.File) map[string]bool {
 	out := map[string]bool{}
 	for _, file := range files {
 		ast.Inspect(file, func(n ast.Node) bool {
@@ -218,7 +341,7 @@ func ignoredFields(files []*ast.File) map[string]bool {
 				return true
 			}
 			for _, field := range strct.Fields.List {
-				if !hasIgnoreMarker(field) {
+				if !isExempt(field) {
 					continue
 				}
 				for _, name := range field.Names {
@@ -231,9 +354,16 @@ func ignoredFields(files []*ast.File) map[string]bool {
 	return out
 }
 
-func hasIgnoreMarker(field *ast.Field) bool {
+func isExempt(field *ast.Field) bool {
 	for _, group := range []*ast.CommentGroup{field.Doc, field.Comment} {
-		if group != nil && strings.Contains(group.Text(), ignoreMarker) {
+		if group == nil {
+			continue
+		}
+		text := group.Text()
+		if strings.Contains(text, ignoreMarker) {
+			return true
+		}
+		if !reportTodos && strings.Contains(text, todoMarker) {
 			return true
 		}
 	}
