@@ -72,11 +72,22 @@ type (
 )
 
 type (
-	TransformationEmpty[T any]        func(ctx HandlerContext) *T
-	TransformationSingle[I, O any]    func(ctx HandlerContext, i I) *O
-	TransformationMulti[I, O any]     func(ctx HandlerContext, i I) []O
-	TransformationEmptyToMulti[T any] func(ctx HandlerContext) []T
+	TransformationEmpty[T any]                    func(ctx HandlerContext) *T
+	TransformationSingle[I, O any]                func(ctx HandlerContext, i I) *O
+	TransformationMulti[I, O any]                 func(ctx HandlerContext, i I) []O
+	TransformationEmptyToMulti[T any]             func(ctx HandlerContext) []T
+	TransformationSingleStatus[I, IStatus, O any] func(ctx HandlerContext, i I) (*IStatus, *O)
+	TransformationMultiStatus[I, IStatus, O any]  func(ctx HandlerContext, i I) (*IStatus, []O)
 )
+
+type ObjectWithStatus[I, IStatus any] struct {
+	Obj    I
+	Status IStatus
+}
+
+func (c ObjectWithStatus[I, IStatus]) ResourceName() string { return "" }
+
+func (c ObjectWithStatus[I, IStatus]) Equals(o ObjectWithStatus[I, IStatus]) bool { return false }
 
 type Equaler[K any] interface{ Equals(k K) bool }
 
@@ -116,11 +127,35 @@ func MapCollection[T, U any](c Collection[T], fn func(T) U, opts ...CollectionOp
 	return nil
 }
 
+func NewStatusCollection[I, IStatus, O any](
+	c Collection[I], hf TransformationSingleStatus[I, IStatus, O], opts ...CollectionOption,
+) (Collection[ObjectWithStatus[I, IStatus]], Collection[O]) {
+	return nil, nil
+}
+
+func NewStatusManyCollection[I, IStatus, O any](
+	c Collection[I], hf TransformationMultiStatus[I, IStatus, O], opts ...CollectionOption,
+) (Collection[ObjectWithStatus[I, IStatus]], Collection[O]) {
+	return nil, nil
+}
+
 func Fetch[T any](ctx HandlerContext, cc Collection[T], opts ...FetchOption) []T { return nil }
 
 func FetchOne[T any](ctx HandlerContext, c Collection[T], opts ...FetchOption) *T { return nil }
 
 func FetchOrList[T any](ctx HandlerContext, cc Collection[T], opts ...FetchOption) []T { return nil }
+
+func PartialFetch[T, S any](
+	ctx HandlerContext, cc Collection[T], xfm func(T) S, equality func(S, S) bool, opts ...FetchOption,
+) []S {
+	return nil
+}
+
+func PartialFetchComparable[T any, S comparable](
+	ctx HandlerContext, cc Collection[T], xfm func(T) S, opts ...FetchOption,
+) []S {
+	return nil
+}
 
 func FilterKey(k string) FetchOption { return nil }
 

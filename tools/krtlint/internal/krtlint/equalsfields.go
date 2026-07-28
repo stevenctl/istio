@@ -113,9 +113,10 @@ func namedOf(t types.Type) *types.Named {
 //
 // This applies only when ResourceName is in fact how krt keys the type: a Kubernetes object
 // or a config.Config is keyed by its metadata, and any ResourceName it also happens to
-// declare is not consulted.
+// declare is not consulted. The Equals receiver does not say whether the collection holds T
+// or *T, so a ResourceName that only keys the pointer is accepted too.
 func keyFields(info *types.Info, recvType types.Type, decl *ast.FuncDecl) map[string]bool {
-	if decl == nil || KeyOf(recvType) != KeyResourceNamer {
+	if decl == nil || (KeyOf(recvType) != KeyResourceNamer && KeyOf(types.NewPointer(recvType)) != KeyResourceNamer) {
 		return nil
 	}
 	recv := onlyNamed(info, decl.Recv)

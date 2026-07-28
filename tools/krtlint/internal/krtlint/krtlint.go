@@ -155,7 +155,12 @@ func returnsStringMapMethod(t types.Type, name string) bool {
 	if !ok || sig.Params().Len() != 0 || sig.Results().Len() != 1 {
 		return false
 	}
-	m, ok := types.Unalias(sig.Results().At(0).Type()).(*types.Map)
+	return isStringMap(sig.Results().At(0).Type())
+}
+
+// isStringMap reports whether t is map[string]string.
+func isStringMap(t types.Type) bool {
+	m, ok := types.Unalias(t).(*types.Map)
 	if !ok {
 		return false
 	}
@@ -247,17 +252,24 @@ func KeyOf(t types.Type) KeyStrategy {
 	return KeyNone
 }
 
-// isApplyConfiguration mirrors GetApplyConfigKey, which keys off the type name suffix.
+// isApplyConfiguration mirrors GetApplyConfigKey: the type name suffix short-circuit,
+// then a struct carrying the ObjectMetaApplyConfiguration field the key is read from.
+// Without the field, GetApplyConfigKey returns nil and GetKey panics.
 func isApplyConfiguration(t types.Type) bool {
 	base := t
 	if p, ok := types.Unalias(base).(*types.Pointer); ok {
 		base = p.Elem()
 	}
 	n, ok := types.Unalias(base).(*types.Named)
+	if !ok || !strings.HasSuffix(n.Obj().Name(), "ApplyConfiguration") {
+		return false
+	}
+	s, ok := StructOf(base)
 	if !ok {
 		return false
 	}
-	return strings.HasSuffix(n.Obj().Name(), "ApplyConfiguration")
+	_, ok = fieldByName(s, "ObjectMetaApplyConfiguration")
+	return ok
 }
 
 // EqualsMethod returns the Equals method that krt.Equal would dispatch to for values of
@@ -314,8 +326,9 @@ func TypeName(t types.Type) string {
 	return types.TypeString(t, func(p *types.Package) string { return p.Name() })
 }
 
-// CalleeFrom returns the object called by call if it resolves to a function in pkgPath.
-func CalleeFrom(info *types.Info, call *ast.CallExpr, pkgPath string) *types.Func {
+// Callee returns the function or method called by call, or nil if it does not resolve
+// to one.
+func Callee(info *types.Info, call *ast.CallExpr) *types.Func {
 	var id *ast.Ident
 	switch fn := ast.Unparen(call.Fun).(type) {
 	case *ast.Ident:
@@ -330,11 +343,17 @@ func CalleeFrom(info *types.Info, call *ast.CallExpr, pkgPath string) *types.Fun
 	if id == nil {
 		return nil
 	}
-	obj, ok := info.Uses[id].(*types.Func)
-	if !ok || obj.Pkg() == nil || obj.Pkg().Path() != pkgPath {
+	fn, _ := info.Uses[id].(*types.Func)
+	return fn
+}
+
+// CalleeFrom returns the function called by call if it resolves to one declared in pkgPath.
+func CalleeFrom(info *types.Info, call *ast.CallExpr, pkgPath string) *types.Func {
+	fn := Callee(info, call)
+	if fn == nil || fn.Pkg() == nil || fn.Pkg().Path() != pkgPath {
 		return nil
 	}
-	return obj
+	return fn
 }
 
 func identOf(e ast.Expr) *ast.Ident {

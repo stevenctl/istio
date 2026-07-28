@@ -58,11 +58,13 @@ var filterRequirements = map[string]filterRequirement{
 	},
 	"FilterSelects": {
 		accessor: "selector",
-		explain:  "implement `GetLabelSelector() map[string]string` with a value receiver, or expose a `Spec.Selector` field",
+		explain: "implement `GetLabelSelector() map[string]string` with a value receiver, or expose a " +
+			"`Spec.Selector` field of type map[string]string or *v1beta1.WorkloadSelector",
 	},
 	"FilterSelectsNonEmpty": {
 		accessor: "selector",
-		explain:  "implement `GetLabelSelector() map[string]string` with a value receiver, or expose a `Spec.Selector` field",
+		explain: "implement `GetLabelSelector() map[string]string` with a value receiver, or expose a " +
+			"`Spec.Selector` field of type map[string]string or *v1beta1.WorkloadSelector",
 	},
 }
 
@@ -138,7 +140,11 @@ func hasAccessor(t types.Type, kind string) bool {
 	switch kind {
 	case "labels":
 		// metav1.Object also provides GetLabels, so this covers Kubernetes types.
-		return returnsStringMapMethod(t, "GetLabels") || isConfigConfig(t)
+		// getLabels asserts the value config.Config only; a *config.Config panics.
+		if _, valueConfig := NamedFrom(t, configPkgPath, "Config"); valueConfig {
+			return true
+		}
+		return returnsStringMapMethod(t, "GetLabels")
 	case "selector":
 		if returnsStringMapMethod(t, "GetLabelSelector") {
 			return true
@@ -149,7 +155,7 @@ func hasAccessor(t types.Type, kind string) bool {
 }
 
 // hasSpecSelector mirrors the reflection fallback in krt's getLabelSelector, which reads
-// the Selector field of the Spec field.
+// the Selector field of the Spec field and panics on any type but the two it switches on.
 func hasSpecSelector(t types.Type) bool {
 	s, ok := StructOf(t)
 	if !ok {
@@ -163,7 +169,18 @@ func hasSpecSelector(t types.Type) bool {
 	if !ok {
 		return false
 	}
-	_, ok = fieldByName(specStruct, "Selector")
+	sel, ok := fieldByName(specStruct, "Selector")
+	if !ok {
+		return false
+	}
+	if isStringMap(sel.Type()) {
+		return true
+	}
+	p, ok := types.Unalias(sel.Type()).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	_, ok = NamedFrom(p.Elem(), "istio.io/api/type/v1beta1", "WorkloadSelector")
 	return ok
 }
 

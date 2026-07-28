@@ -22,6 +22,15 @@ go run ./tools/krtlint -krtfetch ./pilot/...
 go run ./tools/krtlint -krtequalsfields=false ./pilot/...
 ```
 
+## Status
+
+`make lint-krt` is not yet part of `lint` because the tree does not pass clean. The
+remaining findings need code fixes rather than annotations: fields missing from `Equals`
+implementations in `pilot/pkg/model` (including a self-comparison bug in
+`ServiceAttributes.Equals`), untracked `Singleton.Get` and `Index.Lookup` reads in the
+ambient index, and `Equals` methods in `agentgateway` that krt cannot dispatch to.
+Once those are addressed, `lint-krt` can join `lint`.
+
 ## Checks
 
 ### `krtkey`
@@ -74,7 +83,7 @@ Go will not let you declare `Equals` there, so the fix is a wrapper type or the 
 
 ### `krtequalsfields`
 
-When `Equals` returns true krt keeps the *old* object (`collection.go:515-518`), so a field
+When `Equals` returns true krt keeps the *old* object, so a field
 missing from `Equals` does not merely miss an event — it stays permanently stale in the
 collection, and in any index built on it, until some compared field happens to change. This
 reports three shapes:
@@ -135,7 +144,9 @@ reflection; the krt README notes that "failures to meet this requirement will re
 `panic`". Worse, the panic only fires once a candidate object actually reaches the filter,
 so it can lie dormant. This reports `krt.FilterLabel`, `krt.FilterSelects` and
 `krt.FilterSelectsNonEmpty` applied to a collection whose element type provides neither the
-accessor method nor the `Spec.Selector` field krt falls back to.
+accessor method nor the reflective fallback krt accepts: a `Spec.Selector` field of type
+`map[string]string` or `*v1beta1.WorkloadSelector`. A selector field of any other type — a
+`*metav1.LabelSelector`, say — panics just the same, so it is reported too.
 
 ## Suppressing a diagnostic
 
@@ -177,8 +188,8 @@ go run ./tools/krtlint ./pilot/...            # what CI enforces
 go run ./tools/krtlint -noignore ./pilot/...  # every suppression revealed
 ```
 
-Running it as a separate non-blocking job keeps `make lint-krt` green on the intentional set
-while leaving the accepted debt visible.
+Running `-noignore` as a separate non-blocking job keeps the accepted debt visible while the
+default form enforces the intentional set.
 
 ## Tests
 

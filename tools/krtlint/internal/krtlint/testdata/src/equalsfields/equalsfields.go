@@ -153,6 +153,17 @@ func (k Keyed) Equals(o Keyed) bool { // want `equalsfields\.Keyed\.Equals does 
 	return k.Value == o.Value
 }
 
+// PtrKeyed declares ResourceName on the pointer receiver, as a collection of *PtrKeyed uses.
+// Its key fields are exempt just as with a value receiver.
+type PtrKeyed struct {
+	Source string
+	Value  int
+}
+
+func (p *PtrKeyed) ResourceName() string { return p.Source }
+
+func (p *PtrKeyed) Equals(o *PtrKeyed) bool { return p.Value == o.Value }
+
 // KeyedIndirect reaches its key fields through a helper. The field selection still happens in
 // ResourceName, so the exemption holds.
 type KeyedIndirect struct {

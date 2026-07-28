@@ -55,19 +55,15 @@ const maxDepth = 8
 
 func runEqual(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
-	// A defect in the type declaration is reported once per package: one fix serves every
-	// collection built on the type, so repeating it per construction site would only
-	// multiply the same remedy. Whether an unguarded field actually costs anything is a
-	// property of the collection rather than the type, so those are reported at every site,
-	// each one its own judgment call and its own opt-out.
 	declaredDefect := map[string]bool{}
 	for call := range insp.PreorderSeq((*ast.CallExpr)(nil)) {
 		call := call.(*ast.CallExpr)
-		elem, ok := constructedElem(pass.TypesInfo, call)
-		if !ok || IsTypeParam(elem) {
-			continue
+		for _, elem := range constructedElems(pass.TypesInfo, call) {
+			if IsTypeParam(elem) {
+				continue
+			}
+			checkEquality(pass, call.Pos(), elem, declaredDefect)
 		}
-		checkEquality(pass, call.Pos(), elem, declaredDefect)
 	}
 	return nil, nil
 }
@@ -82,17 +78,19 @@ func checkEquality(pass *analysis.Pass, pos token.Pos, elem types.Type, declared
 		pass.Reportf(pos, format, args...)
 	}
 
+	if EqualsMethod(elem) != nil {
+		return
+	}
 	// An Equals method that krt cannot dispatch to is worse than none at all: the author
-	// believes comparison is handled, but krt silently uses reflect.DeepEqual.
-	if EqualsMethod(elem) == nil {
-		if declared := DeclaredEquals(elem); declared != nil {
-			once("krt collection element type %s declares %s, but krt.Equal cannot dispatch to it: "+
-				"the parameter must be exactly %s or *%s. krt will silently fall back to reflect.DeepEqual",
-				name, signatureOf(declared), name, name)
-			return
+	// believes comparison is handled, but krt actually uses the fallback.
+	if declared := DeclaredEquals(elem); declared != nil {
+		fallback := "krt will silently fall back to reflect.DeepEqual"
+		if embedsProto(elem) {
+			fallback = "krt.Equal will panic on the embedded protobuf message"
 		}
-	} else {
-		// krt will use the custom implementation; nothing further to verify here.
+		once("krt collection element type %s declares %s, but krt.Equal cannot dispatch to it: "+
+			"the parameter must be exactly %s or *%s. %s",
+			name, signatureOf(declared), name, name, fallback)
 		return
 	}
 
@@ -131,11 +129,6 @@ func remedyFor(pass *analysis.Pass, elem types.Type, name string) string {
 
 // hazardEffects says what reflect.DeepEqual actually gets wrong for each kind of field, keyed
 // by hazard kind and taking the field path.
-//
-// All of them err in the same direction: a genuine difference is still caught, so the cost is
-// recomputation that changes nothing rather than a change that never propagates. That is worth
-// stating, because it is what makes an opt-out a reasonable answer at a site where the
-// comparison provably cannot run.
 var hazardEffects = map[string]string{
 	"protobuf messages": "Field %s reaches a protobuf message, which carries unexported state that " +
 		"marshaling writes in place, so two equal objects can compare unequal",
@@ -155,8 +148,7 @@ type hazard struct {
 // actionable.
 func equalityHazards(t types.Type) []hazard {
 	found := map[string]hazard{}
-	visited := map[string]bool{}
-	walkEquality(t, "", 0, visited, found)
+	walkEquality(t, "", 0, found)
 	out := make([]hazard, 0, len(found))
 	for _, kind := range []string{"protobuf messages", "func values", "synchronization primitives"} {
 		if h, ok := found[kind]; ok {
@@ -166,16 +158,10 @@ func equalityHazards(t types.Type) []hazard {
 	return out
 }
 
-func walkEquality(t types.Type, path string, depth int, visited map[string]bool, found map[string]hazard) {
+func walkEquality(t types.Type, path string, depth int, found map[string]hazard) {
 	if depth > maxDepth || t == nil {
 		return
 	}
-	key := types.TypeString(t, nil) + "@" + path
-	if visited[key] {
-		return
-	}
-	visited[key] = true
-
 	if path != "" {
 		if IsProtoMessage(t) || IsProtoMessage(types.NewPointer(t)) {
 			record(found, hazard{path: path, kind: "protobuf messages"})
@@ -189,10 +175,10 @@ func walkEquality(t types.Type, path string, depth int, visited map[string]bool,
 
 	switch u := types.Unalias(t).(type) {
 	case *types.Pointer:
-		walkEquality(u.Elem(), path, depth+1, visited, found)
+		walkEquality(u.Elem(), path, depth+1, found)
 		return
 	case *types.Named:
-		walkEquality(u.Underlying(), path, depth+1, visited, found)
+		walkEquality(u.Underlying(), path, depth+1, found)
 		return
 	}
 
@@ -204,15 +190,15 @@ func walkEquality(t types.Type, path string, depth int, visited map[string]bool,
 			if path != "" {
 				child = path + "." + f.Name()
 			}
-			walkEquality(f.Type(), child, depth+1, visited, found)
+			walkEquality(f.Type(), child, depth+1, found)
 		}
 	case *types.Slice:
-		walkEquality(u.Elem(), path+"[]", depth+1, visited, found)
+		walkEquality(u.Elem(), path+"[]", depth+1, found)
 	case *types.Array:
-		walkEquality(u.Elem(), path+"[]", depth+1, visited, found)
+		walkEquality(u.Elem(), path+"[]", depth+1, found)
 	case *types.Map:
-		walkEquality(u.Key(), path+"[key]", depth+1, visited, found)
-		walkEquality(u.Elem(), path+"[value]", depth+1, visited, found)
+		walkEquality(u.Key(), path+"[key]", depth+1, found)
+		walkEquality(u.Elem(), path+"[value]", depth+1, found)
 	case *types.Signature:
 		if path != "" {
 			record(found, hazard{path: path, kind: "func values"})
@@ -244,13 +230,13 @@ func isSyncPrimitive(t types.Type) bool {
 	return false
 }
 
-// embedsProto reports whether t promotes ProtoReflect from an embedded message rather
-// than being a protobuf message itself.
+// embedsProto reports whether t promotes ProtoReflect from an embedded message rather than
+// being a protobuf message itself. Only the value method set is consulted, matching the
+// boxed assertion in krt.Equal: a message embedded by value promotes ProtoReflect to the
+// pointer set only, so krt.Equal never sees it and the type is an ordinary
+// reflect.DeepEqual hazard rather than a panic.
 func embedsProto(t types.Type) bool {
 	fn := Method(t, "ProtoReflect")
-	if fn == nil {
-		fn = Method(types.NewPointer(t), "ProtoReflect")
-	}
 	if fn == nil {
 		return false
 	}
