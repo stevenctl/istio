@@ -25,29 +25,12 @@ import (
 // IgnoreDirective opts out of one or more krt analyzers, in the shape of //nolint.
 //
 //	//nokrtlint                      -- silence every analyzer
-//	//nokrtlint:krtequal             -- silence one
-//	//nokrtlint:krtequal,krtfetch    -- silence several
-//
-// Text after `--` is a free-form reason and is not interpreted, so the conventional form
-// carries one:
-//
+//	//nokrtlint:krtequal,krtfetch    -- silence some
 //	//nokrtlint:krtequal -- placeholder collection, never written to
 //
-// Keep the reason on the directive's own line. gofmt moves directive comments to the end of a
-// doc comment block, which would strand any continuation lines above them; put a longer
-// explanation in the prose before the directive instead.
-//
-// What it covers depends on where it sits. On a struct field it exempts that field wherever it
-// is reported from, which is what krtequalsfields needs, since that diagnostic lands on the
-// Equals method rather than on the field. Anywhere else it covers diagnostics reported in the
-// comment group holding it and on the line immediately after, so it can trail a statement or
-// sit in the doc comment of the declaration it excuses.
-//
-// Prefer the field form where it fits: it says which field is excused rather than silencing a
-// whole method, and it survives the code moving around.
-//
-// -noignore disables every directive at once, which is the only way to see what a tree has
-// silenced.
+// Text after `--` is a free-form reason. On a struct field the directive exempts that field
+// wherever it is reported from; anywhere else it covers its own comment group and the line
+// below it. See tools/krtlint/README.md for the full rules.
 const IgnoreDirective = "//nokrtlint"
 
 // NoIgnore disables every directive, so a run reports what the tree has silenced. Nothing else
@@ -175,14 +158,13 @@ func parseIgnoreDirective(text string) (map[string]bool, bool) {
 	return names, true
 }
 
-// withIgnores wraps an analyzer's Run so that diagnostics landing on an ignored line are
-// dropped. The analyzer is modified in place, so identity is preserved for anything that
-// depends on it.
+// withIgnores wraps an analyzer's Run, in place, so that diagnostics landing on an ignored
+// line are dropped.
 //
 // The wrapper hands the inner Run a shallow copy of the pass carrying a filtering Report.
 // Everything else, including ResultOf and the fact set, is shared with the original pass, so
 // the analyzer cannot tell the difference.
-func withIgnores(a *analysis.Analyzer) *analysis.Analyzer {
+func withIgnores(a *analysis.Analyzer) {
 	run := a.Run
 	a.Run = func(pass *analysis.Pass) (any, error) {
 		if NoIgnore {
@@ -198,5 +180,4 @@ func withIgnores(a *analysis.Analyzer) *analysis.Analyzer {
 		}
 		return run(&filtered)
 	}
-	return a
 }

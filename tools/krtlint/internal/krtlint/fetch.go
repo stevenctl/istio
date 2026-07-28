@@ -120,20 +120,8 @@ const logPkgPath = "istio.io/istio/pkg/log"
 
 // isLoggingCall reports whether call emits a log message.
 func isLoggingCall(info *types.Info, call *ast.CallExpr) bool {
-	var id *ast.Ident
-	switch fn := ast.Unparen(call.Fun).(type) {
-	case *ast.SelectorExpr:
-		id = fn.Sel
-	case *ast.Ident:
-		id = fn
-	default:
-		return false
-	}
-	obj, ok := info.Uses[id].(*types.Func)
-	if !ok || obj.Pkg() == nil {
-		return false
-	}
-	return obj.Pkg().Path() == logPkgPath
+	fn := Callee(info, call)
+	return fn != nil && fn.Pkg() != nil && fn.Pkg().Path() == logPkgPath
 }
 
 // checkUntrackedRead reports reads of a collection that bypass Fetch and so do not
@@ -177,17 +165,8 @@ func checkUntrackedRead(pass *analysis.Pass, call *ast.CallExpr) {
 
 // checkNondeterminism reports calls that make a transformation unreproducible.
 func checkNondeterminism(pass *analysis.Pass, call *ast.CallExpr) {
-	var id *ast.Ident
-	switch fn := ast.Unparen(call.Fun).(type) {
-	case *ast.SelectorExpr:
-		id = fn.Sel
-	case *ast.Ident:
-		id = fn
-	default:
-		return
-	}
-	obj, ok := pass.TypesInfo.Uses[id].(*types.Func)
-	if !ok || obj.Pkg() == nil {
+	obj := Callee(pass.TypesInfo, call)
+	if obj == nil || obj.Pkg() == nil {
 		return
 	}
 	// Only package-level functions; a method named Now on some other type is unrelated.

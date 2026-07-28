@@ -54,52 +54,67 @@ var elementConstructors = map[string]bool{
 	"NewStatusManyCollection": true,
 }
 
-// constructedElem returns the element type produced by a krt collection constructor call.
-func constructedElem(info *types.Info, call *ast.CallExpr) (types.Type, bool) {
+// constructedElems returns the element types produced by a krt collection constructor call.
+// The status constructors return both a status and an output collection, so a single call
+// can produce more than one.
+func constructedElems(info *types.Info, call *ast.CallExpr) []types.Type {
 	fn := CalleeFrom(info, call, PkgPath)
 	if fn == nil || !elementConstructors[fn.Name()] {
-		return nil, false
+		return nil
 	}
 	tv, ok := info.Types[call]
 	if !ok {
-		return nil, false
+		return nil
 	}
-	if tuple, ok := tv.Type.(*types.Tuple); ok {
-		for i := range tuple.Len() {
-			if elem, ok := CollectionElem(tuple.At(i).Type()); ok {
-				return elem, true
-			}
+	var out []types.Type
+	tuple, ok := tv.Type.(*types.Tuple)
+	if !ok {
+		if elem, ok := CollectionElem(tv.Type); ok {
+			out = append(out, elem)
 		}
-		return nil, false
+		return out
 	}
-	return CollectionElem(tv.Type)
+	for i := range tuple.Len() {
+		if elem, ok := CollectionElem(tuple.At(i).Type()); ok {
+			out = append(out, elem)
+		}
+	}
+	return out
 }
 
 func runKey(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 	for call := range insp.PreorderSeq((*ast.CallExpr)(nil)) {
 		call := call.(*ast.CallExpr)
-		elem, ok := constructedElem(pass.TypesInfo, call)
-		if !ok || IsTypeParam(elem) {
-			continue
-		}
-		if KeyOf(elem) != KeyNone {
-			continue
-		}
-		// A very common mistake: the accessor is declared on the pointer receiver, but the
-		// collection holds values. krt asserts against the boxed value, so it never matches.
-		if ptrOnlyKeyAccessor(elem) {
+		for _, elem := range constructedElems(pass.TypesInfo, call) {
+			if IsTypeParam(elem) || KeyOf(elem) != KeyNone {
+				continue
+			}
+			// A defined string type boxes as itself, so krt's `any(a).(string)` never matches
+			// and suggesting ResourceName would miss the simpler fix.
+			if basic, ok := elem.Underlying().(*types.Basic); ok && basic.Kind() == types.String {
+				pass.Reportf(call.Pos(),
+					"krt collection element type %s has no key: krt.GetKey accepts only the builtin "+
+						"string, not a defined string type, and will panic. Convert to string, or "+
+						"implement `ResourceName() string` on %s",
+					TypeName(elem), TypeName(elem))
+				continue
+			}
+			// A very common mistake: the accessor is declared on the pointer receiver, but the
+			// collection holds values. krt asserts against the boxed value, so it never matches.
+			if ptrOnlyKeyAccessor(elem) {
+				pass.Reportf(call.Pos(),
+					"krt collection element type %s has no key: ResourceName is declared on *%s, "+
+						"but krt.GetKey inspects the value method set and will panic. "+
+						"Use a value receiver, or make this a collection of *%s",
+					TypeName(elem), TypeName(elem), TypeName(elem))
+				continue
+			}
 			pass.Reportf(call.Pos(),
-				"krt collection element type %s has no key: ResourceName is declared on *%s, "+
-					"but krt.GetKey inspects the value method set and will panic. "+
-					"Use a value receiver, or make this a collection of *%s",
-				TypeName(elem), TypeName(elem), TypeName(elem))
-			continue
+				"krt collection element type %s has no key: krt.GetKey will panic at runtime. "+
+					"Implement `ResourceName() string` with a value receiver, or embed krt.Named",
+				TypeName(elem))
 		}
-		pass.Reportf(call.Pos(),
-			"krt collection element type %s has no key: krt.GetKey will panic at runtime. "+
-				"Implement `ResourceName() string` with a value receiver, or embed krt.Named",
-			TypeName(elem))
 	}
 	return nil, nil
 }

@@ -86,6 +86,22 @@ type EmbeddedProto struct {
 	*pb.Address
 }
 
+// ValueEmbedded embeds the message by value, so the promoted ProtoReflect is only in the
+// pointer method set. krt.Equal never sees it and silently uses reflect.DeepEqual.
+type ValueEmbedded struct {
+	krt.Named
+	pb.Address
+}
+
+// PanicDispatch declares an undispatchable Equals and also promotes ProtoReflect, so the
+// fallback is not reflect.DeepEqual but the embedded-proto panic.
+type PanicDispatch struct {
+	krt.Named
+	*pb.Address
+}
+
+func (p PanicDispatch) Equals(o any) bool { return false }
+
 func good(c krt.Collection[Input]) {
 	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *Plain { return nil })
 	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *Compared { return nil })
@@ -100,6 +116,8 @@ func bad(c krt.Collection[Input]) {
 	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithFunc { return nil })      // want `Field OnChange is a func value`
 	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *WithMutex { return nil })     // want `Field mu holds a synchronization primitive`
 	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *EmbeddedProto { return nil }) // want `embeds a protobuf message`
+	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *ValueEmbedded { return nil }) // want `Field Address reaches a protobuf message`
+	krt.NewCollection(c, func(ctx krt.HandlerContext, i Input) *PanicDispatch { return nil }) // want `cannot dispatch to it.*krt\.Equal will panic on the embedded protobuf message`
 }
 
 // Whether an unguarded protobuf costs anything depends on the collection, so every
